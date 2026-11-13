@@ -34,6 +34,8 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
     private val en = EnglishLexicon()
     /** 用户词典：AI 生成 / 导入 / 自建词条 */
     val userLexicon = UserLexicon(appContext)
+    /** 明快键盘的上下形索引 */
+    val mingKwai = MingKwaiLexicon()
     private val history = UserHistory(appContext)
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -60,6 +62,13 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
                         .use { zhInitials.load(it) }
                 }
                 appContext.assets.open("lexicon/en_words.txt").bufferedReader().use { en.load(it) }
+                runCatching {
+                    appContext.assets.open("lexicon/mingkwai_keys.txt").bufferedReader().use { keys ->
+                        appContext.assets.open("lexicon/mingkwai_index.txt").bufferedReader().use { idx ->
+                            mingKwai.load(keys, idx)
+                        }
+                    }
+                }
                 userLexicon.load()
                 history.load()
                 corrector = LatinCorrector(en)

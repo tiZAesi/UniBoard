@@ -11,8 +11,8 @@ android {
         applicationId = "org.YavSoft.UniBoard"
         minSdk = 26
         targetSdk = 34
-        versionCode = 17
-        versionName = "LabicBuild-1.0.3.0"
+        versionCode = 18
+        versionName = "LabicBuild-1.0.3.1"
         resourceConfigurations += listOf("en", "zh")
     }
 

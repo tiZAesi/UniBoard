@@ -161,8 +161,8 @@ class SettingsActivity : SettingsBase() {
         subtitle("默认使用 Unicode 直输盘，通过输入十六进制码点选择字符。")
         section("默认输入模式")
         val c1 = card()
-        toggle(c1, "九键拼音键盘", "中文模式下使用九键（T9）布局，单手更省力", prefs.nineKeyPinyin) {
-            prefs.nineKeyPinyin = it
+        choice(c1, listOf("全键盘", "九键（T9）", "明快（上下形取字）"), prefs.keyboardType) {
+            prefs.keyboardType = it
             recreate()
         }
         choice(c1, listOf("Unicode 直输", "中文拼音", "英文"), prefs.defaultMode.coerceIn(0, 2)) {
@@ -246,6 +246,18 @@ class SettingsActivity : SettingsBase() {
         toggle(c6, "剪贴板面板", "", prefs.toolClipboard) { prefs.toolClipboard = it }
         toggle(c6, "AI 润色", "需先在「AI 助手」中启用", prefs.toolAi) { prefs.toolAi = it }
         toggle(c6, "文本编辑面板", "光标移动 / 全选 / 复制粘贴", prefs.toolEdit) { prefs.toolEdit = it }
+        toggle(c6, "切换键盘", "在候选栏里循环切换全键盘 / 九键 / 明快", prefs.toolKeyboard) {
+            prefs.toolKeyboard = it
+        }
+        toggle(c6, "光标左移", "候选栏放一个左移键", prefs.toolCursorLeft) {
+            prefs.toolCursorLeft = it
+        }
+        toggle(c6, "光标右移", "候选栏放一个右移键", prefs.toolCursorRight) {
+            prefs.toolCursorRight = it
+        }
+        toggle(c6, "删除键", "候选栏放一个删除键", prefs.toolDelete) {
+            prefs.toolDelete = it
+        }
         c6.addView(TextView(this).apply {
             text = "最右侧的 × 键用于关闭键盘；长按该键进入本设置页。"
             textSize = 12f

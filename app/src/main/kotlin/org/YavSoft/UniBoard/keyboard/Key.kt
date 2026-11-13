@@ -79,6 +79,15 @@ sealed interface KeyAction {
 
     /** 把输入框内容交给 AI 联想下一句 */
     data object AiSuggest : KeyAction
+
+    /** 明快键盘：按下一个形状键（id 对应 assets 里的形状键序号） */
+    data class MingKwai(val id: Int) : KeyAction
+
+    /** 重输：再次上屏上一次提交的文本 */
+    data object RepeatLast : KeyAction
+
+    /** 循环切换键盘类型：全键盘 → 九键 → 明快 */
+    data object CycleKeyboard : KeyAction
 }
 
 /** 单个按键定义 */

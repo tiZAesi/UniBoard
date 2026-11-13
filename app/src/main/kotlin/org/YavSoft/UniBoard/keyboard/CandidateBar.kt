@@ -59,6 +59,10 @@ class CandidateBar @JvmOverloads constructor(
         CLIPBOARD(R.drawable.ic_clipboard),
         AI(R.drawable.ic_star),
         EDIT(R.drawable.ic_edit),
+        KEYBOARD(R.drawable.ic_keyboard),
+        CURSOR_LEFT(R.drawable.ic_cursor_left),
+        CURSOR_RIGHT(R.drawable.ic_cursor_right),
+        DELETE(R.drawable.ic_backspace),
         CLOSE(R.drawable.ic_keyboard_hide)
     }
 

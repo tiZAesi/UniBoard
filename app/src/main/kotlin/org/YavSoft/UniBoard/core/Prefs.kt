@@ -168,6 +168,26 @@ class Prefs(context: Context) {
     var toolEdit: Boolean
         get() = readBool("tool_edit", true)
         set(v) = sp.edit().putBoolean("tool_edit", v).apply()
+
+    /** 工具栏：切换键盘类型（全键盘 / 九键 / 明快） */
+    var toolKeyboard: Boolean
+        get() = readBool("tool_keyboard", true)
+        set(v) = sp.edit().putBoolean("tool_keyboard", v).apply()
+
+    /** 工具栏：光标左移 */
+    var toolCursorLeft: Boolean
+        get() = readBool("tool_cursor_left", false)
+        set(v) = sp.edit().putBoolean("tool_cursor_left", v).apply()
+
+    /** 工具栏：光标右移 */
+    var toolCursorRight: Boolean
+        get() = readBool("tool_cursor_right", false)
+        set(v) = sp.edit().putBoolean("tool_cursor_right", v).apply()
+
+    /** 工具栏：删除 */
+    var toolDelete: Boolean
+        get() = readBool("tool_delete", false)
+        set(v) = sp.edit().putBoolean("tool_delete", v).apply()
     var toolSettings: Boolean
         get() = readBool("tool_settings", true)
         set(v) = sp.edit().putBoolean("tool_settings", v).apply()
@@ -240,10 +260,17 @@ class Prefs(context: Context) {
         get() = readBool(K_INITIALS, true)
         set(v) = sp.edit().putBoolean(K_INITIALS, v).apply()
 
-    /** 中文模式下使用九键（T9）拼音键盘，而不是全键盘 */
+    /** 中文模式的键盘类型：0=全键盘 1=九键（T9） 2=明快（上下形取字） */
+    var keyboardType: Int
+        get() = readInt(K_KEYBOARD_TYPE, 0)
+        set(v) = sp.edit().putInt(K_KEYBOARD_TYPE, v.coerceIn(0, 2)).apply()
+
+    /** 兼容旧开关：勾上即键盘类型切到九键 */
     var nineKeyPinyin: Boolean
-        get() = readBool(K_NINE_KEY, false)
-        set(v) = sp.edit().putBoolean(K_NINE_KEY, v).apply()
+        get() = keyboardType == 1
+        set(v) {
+            if (v) keyboardType = 1 else if (keyboardType == 1) keyboardType = 0
+        }
 
     /** 中英混输：拼音候选里内联英文词，免去切换输入模式 */
     var mixedEnglish: Boolean
@@ -441,7 +468,7 @@ class Prefs(context: Context) {
         private const val K_NEXT_WORD = "next_word_predict"
         private const val K_LEARNING = "learning_enabled"
         private const val K_INITIALS = "initials_enabled"
-        private const val K_NINE_KEY = "nine_key_pinyin"
+        private const val K_KEYBOARD_TYPE = "keyboard_type"
         private const val K_MIXED_EN = "mixed_english"
         private const val K_GESTURE = "gesture_input"
 

@@ -32,6 +32,7 @@ import org.YavSoft.UniBoard.core.dpInt
 import org.YavSoft.UniBoard.font.FontResolver
 import org.YavSoft.UniBoard.keyboard.CandidateBar
 import org.YavSoft.UniBoard.keyboard.KeyAction
+import org.YavSoft.UniBoard.keyboard.KeyboardLayout
 import org.YavSoft.UniBoard.keyboard.KeyboardView
 import org.YavSoft.UniBoard.keyboard.Layouts
 import org.YavSoft.UniBoard.predict.Candidate
@@ -70,6 +71,16 @@ class UniBoardImeService : InputMethodService(),
 
     /** 当前是否为九键（T9）拼音键盘：为真时数字键进入组合串并走数字预测 */
     private var nineActive: Boolean = false
+
+    /** 当前是否为明快键盘：为真时形状键走两键取字 */
+    private var mkActive: Boolean = false
+
+    /** 明快键盘已按下的上形 / 下形序号，-1 表示还没按 */
+    private var mkFirst: Int = -1
+    private var mkSecond: Int = -1
+
+    /** 上一次提交的文本，「重输」键重复它 */
+    private var lastCommitted: String? = null
     private var shiftOn: Boolean = false
     /** 是否切到了 PC 键盘 */
     private var pcActive = false
@@ -241,6 +252,10 @@ class UniBoardImeService : InputMethodService(),
         if (prefs.toolClipboard) list.add(CandidateBar.Tool.CLIPBOARD)
         if (prefs.toolAi && prefs.aiEnabled) list.add(CandidateBar.Tool.AI)
         if (prefs.toolEdit) list.add(CandidateBar.Tool.EDIT)
+        if (prefs.toolKeyboard) list.add(CandidateBar.Tool.KEYBOARD)
+        if (prefs.toolCursorLeft) list.add(CandidateBar.Tool.CURSOR_LEFT)
+        if (prefs.toolCursorRight) list.add(CandidateBar.Tool.CURSOR_RIGHT)
+        if (prefs.toolDelete) list.add(CandidateBar.Tool.DELETE)
         // 关闭键盘始终可用（设置入口改成长按这个按钮）
         list.add(CandidateBar.Tool.CLOSE)
         return list
@@ -293,13 +308,17 @@ class UniBoardImeService : InputMethodService(),
             layoutId == Layouts.SYMBOLS -> Layouts.symbols(isChineseMode)
             layoutId == Layouts.SYMBOLS_MORE -> Layouts.symbolsMore(isChineseMode)
             layoutId == Layouts.NINE -> Layouts.nineKey(modeLabel(), isChineseMode)
+            layoutId == Layouts.MINGKWAI -> mingKwaiLayout()
             shiftOn -> Layouts.buildLatin(upper = true, chinese = isChineseMode, numberRow = prefs.numberRow)
-            // 中文模式下可在设置里切到九键；符号页、英文模式仍走全键盘
-            mode == InputMode.PINYIN && prefs.nineKeyPinyin ->
+            // 中文模式下按设置选键盘：全键盘 / 九键 / 明快；符号页与英文模式仍走全键盘
+            mode == InputMode.PINYIN && prefs.keyboardType == 1 ->
                 Layouts.nineKey(modeLabel(), isChineseMode)
+            mode == InputMode.PINYIN && prefs.keyboardType == 2 && engine.mingKwai.isLoaded ->
+                mingKwaiLayout()
             else -> Layouts.buildLatin(upper = false, chinese = isChineseMode, numberRow = prefs.numberRow)
         }
         nineActive = layout.id == Layouts.NINE
+        mkActive = layout.id == Layouts.MINGKWAI
         kb.setLayout(layout)
         kb.shiftLocked = shiftOn
         kb.spaceHint = when {
@@ -357,6 +376,28 @@ class UniBoardImeService : InputMethodService(),
             return
         }
         codeNote = null
+
+        // 明快键盘：两键取字，候选直接来自字形索引
+        if (mkActive) {
+            val lex = engine.mingKwai
+            val words = when {
+                mkFirst < 0 -> emptyList()
+                mkSecond < 0 -> lex.lookupFirst(mkFirst, prefs.candidateCount)
+                else -> lex.lookup(mkFirst, mkSecond, prefs.candidateCount)
+            }
+            currentCandidates = words.map { Candidate(it.text) }
+            correctedHint = null
+            val bar = candidateBar ?: return
+            bar.candidates = currentCandidates
+            bar.statusHint = when {
+                mkFirst < 0 -> "明快：先按上形"
+                mkSecond < 0 -> "明快：${lex.labelOf(mkFirst)} ＋ 下形？"
+                else -> "明快：${lex.labelOf(mkFirst)} ＋ ${lex.labelOf(mkSecond)}"
+            }
+            bar.toolsVisible = currentCandidates.isEmpty()
+            showCandidateBar()
+            return
+        }
 
         // 九键（T9）：组合串是数字，走数字签名匹配
         if (nineActive && composing.isNotEmpty() && composing.all { it in '1'..'9' }) {
@@ -498,6 +539,9 @@ class UniBoardImeService : InputMethodService(),
             KeyAction.EmojiPanel -> openEmojiPanel()
             KeyAction.AiPolish -> aiPolish()
             KeyAction.AiSuggest -> aiSuggest()
+            is KeyAction.MingKwai -> handleMingKwai(action.id)
+            KeyAction.RepeatLast -> repeatLastInput()
+            KeyAction.CycleKeyboard -> cycleKeyboardType()
         }
     }
 
@@ -557,6 +601,7 @@ class UniBoardImeService : InputMethodService(),
             refreshLayout()
         }
         learnWord(out)
+        lastCommitted = out
         val needSpace = mode == InputMode.LATIN && out.last().isLetterOrDigit()
         composer.commit(if (needSpace) "$out " else out)
         if (out.isNotBlank()) {
@@ -567,6 +612,11 @@ class UniBoardImeService : InputMethodService(),
     }
 
     private fun handleBackspace() {
+        if (mkActive && (mkFirst >= 0 || mkSecond >= 0)) {
+            if (mkSecond >= 0) mkSecond = -1 else mkFirst = -1
+            updateCandidates()
+            return
+        }
         when (searchTarget) {
             "unicode" -> { unicodePanel?.backspace(); return }
             "clip" -> { clipboardPanel?.backspace(); return }
@@ -688,6 +738,53 @@ class UniBoardImeService : InputMethodService(),
         updateCandidates()
     }
 
+    /** 明快键盘布局：形状键来自词库，词库未就绪时退回全键盘 */
+    private fun mingKwaiLayout(): KeyboardLayout {
+        val lex = engine.mingKwai
+        if (!lex.isLoaded) return Layouts.buildLatin(upper = false, chinese = isChineseMode, numberRow = false)
+        return Layouts.mingkwai(lex.shapeKeys.map { it.id to it.label }, modeLabel(), isChineseMode)
+    }
+
+    /** 明快键盘：第一键记上形，第二键记下形，第三键起重新开始 */
+    private fun handleMingKwai(id: Int) {
+        when {
+            mkFirst < 0 -> mkFirst = id
+            mkSecond < 0 -> mkSecond = id
+            else -> {
+                mkFirst = id
+                mkSecond = -1
+            }
+        }
+        updateCandidates()
+    }
+
+    /** 重输：把上一次提交的内容再上屏一次 */
+    private fun repeatLastInput() {
+        val text = lastCommitted
+        if (text.isNullOrEmpty()) {
+            toast("暂无可重输的内容")
+            return
+        }
+        composer.commit(if (mode == InputMode.LATIN) "$text " else text)
+        updateCandidates()
+    }
+
+    /** 循环切换中文键盘类型：全键盘 → 九键 → 明快 */
+    private fun cycleKeyboardType() {
+        prefs.keyboardType = (prefs.keyboardType + 1) % 3
+        mkFirst = -1
+        mkSecond = -1
+        refreshLayout()
+        updateCandidates()
+        toast(
+            when (prefs.keyboardType) {
+                1 -> "已切换到九键（T9）键盘"
+                2 -> "已切换到明快键盘（两键取字）"
+                else -> "已切换到全键盘"
+            }
+        )
+    }
+
     /** 底部切换键显示"下一个模式"，点一下即可切过去 */
     private fun modeLabel(): String = when (mode) {
         InputMode.UNICODE -> "中"
@@ -702,6 +799,19 @@ class UniBoardImeService : InputMethodService(),
     private fun commitCandidate(index: Int) {
         val c = currentCandidates.getOrNull(index) ?: return
         val word = c.text
+        if (mkActive) {
+            if (prefs.learningEnabled && !prefs.privacyMode && !secureInput) {
+                engine.noteCommit(word, lastWord)
+                learnWord(word)
+            }
+            composer.commit(word)
+            lastCommitted = word
+            lastWord = word
+            mkFirst = -1
+            mkSecond = -1
+            updateCandidates()
+            return
+        }
         if (prefs.learningEnabled && !prefs.privacyMode && !secureInput) {
             engine.noteCommit(word, lastWord)
             learnWord(word)
@@ -766,6 +876,10 @@ class UniBoardImeService : InputMethodService(),
                     aiPolish()
                 }
             }
+            CandidateBar.Tool.KEYBOARD -> cycleKeyboardType()
+            CandidateBar.Tool.CURSOR_LEFT -> moveCursorBy(-1)
+            CandidateBar.Tool.CURSOR_RIGHT -> moveCursorBy(1)
+            CandidateBar.Tool.DELETE -> handleBackspace()
             CandidateBar.Tool.CLOSE -> requestHideSelf(0)
         }
     }

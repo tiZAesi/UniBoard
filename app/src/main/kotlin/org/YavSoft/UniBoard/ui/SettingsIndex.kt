@@ -60,6 +60,11 @@ object SettingsIndex {
         // 键盘布局与手感
         keyboard("默认输入模式", "unicode 直输 拼音 英文 码点"),
         keyboard("九键拼音键盘", "九键 t9 数字 布局 单手"),
+        keyboard("键盘类型", "全键盘 九键 明快 上下形 取字"),
+        keyboard("切换键盘", "工具栏 键盘 切换 cycle"),
+        keyboard("光标左移", "工具栏 光标 移动 cursor"),
+        keyboard("光标右移", "工具栏 光标 移动 cursor"),
+        keyboard("删除键", "工具栏 删除 backspace"),
         keyboard("键盘高度", "尺寸 高度 height"),
         keyboard("按键圆角", "尺寸 圆角 radius"),
         keyboard("面板高度", "面板 半屏 panel"),

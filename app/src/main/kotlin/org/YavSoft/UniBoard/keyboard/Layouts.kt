@@ -34,6 +34,7 @@ object Layouts {
     const val UNICODE_PAD = "unicode_pad"
     const val PC = "pc"
     const val NINE = "nine"
+    const val MINGKWAI = "mingkwai"
 
     /** 长按备选字符表（拉丁字母的变体与重音形式） */
     private val ACCENTS: Map<String, List<String>> = mapOf(
@@ -248,38 +249,106 @@ object Layouts {
     /**
      * 九键（T9）拼音键盘。
      *
-     * 数字键 2–9 各带三到四个字母，按下的数字进入组合串，
-     * 由 [org.YavSoft.UniBoard.predict.PredictionEngine.predictT9] 折算回拼音候选。
-     * 键帽右下角的小字（hint）即该键承担的字母，与功能机习惯一致。
+     * 排版按单手操作重排：
+     * - 左列固定标点（，。？），不占数字位；
+     * - 中间三列是 2–9 数字键，键面写字母（字号与全键盘一致的按键字号），
+     *   数字缩成右上角小字，长按可弹出该键的字母变体逐个精确输入；
+     * - 右列是重输、切换键盘、退格；
+     * - 底行放符号、光标左右、空格与回车，行数与其他键盘一致（rowCount = 4）。
      */
     fun nineKey(modeLabel: String, chinese: Boolean): KeyboardLayout {
-        fun d(digit: String, letters: String): Key =
-            Key(KeyAction.Insert(digit), label = digit, hint = letters, weight = 1f, style = KeyStyle.CHAR)
+        fun digit(d: String, letters: String): Key = Key(
+            action = KeyAction.Insert(d, letters.map { it.toString() }),
+            label = letters.ifEmpty { d },
+            hint = if (letters.isEmpty()) null else d,
+            weight = 1f,
+            style = KeyStyle.CHAR
+        )
 
         val comma = if (chinese) "，" else ","
         val period = if (chinese) "。" else "."
+        val question = if (chinese) "？" else "?"
+
         val rows = listOf(
-            KeyRow(listOf(d("1", ""), d("2", "abc"), d("3", "def"))),
-            KeyRow(listOf(d("4", "ghi"), d("5", "jkl"), d("6", "mno"))),
-            KeyRow(listOf(d("7", "pqrs"), d("8", "tuv"), d("9", "wxyz"))),
             KeyRow(
                 listOf(
-                    Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1.2f, style = KeyStyle.FUNCTION),
-                    Key(KeyAction.Space, label = "", weight = 2.0f, style = KeyStyle.SPACE),
-                    icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION, 1.2f)
+                    f(comma, KeyStyle.FUNCTION),
+                    digit("1", ""),
+                    digit("2", "abc"),
+                    digit("3", "def"),
+                    icon(KeyAction.RepeatLast, R.drawable.ic_repeat, KeyStyle.FUNCTION)
+                )
+            ),
+            KeyRow(
+                listOf(
+                    f(period, KeyStyle.FUNCTION),
+                    digit("4", "ghi"),
+                    digit("5", "jkl"),
+                    digit("6", "mno"),
+                    icon(KeyAction.CycleKeyboard, R.drawable.ic_keyboard, KeyStyle.FUNCTION)
+                )
+            ),
+            KeyRow(
+                listOf(
+                    f(question, KeyStyle.FUNCTION),
+                    digit("7", "pqrs"),
+                    digit("8", "tuv"),
+                    digit("9", "wxyz"),
+                    icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION)
                         .copy(repeatable = true)
                 )
             ),
             KeyRow(
                 listOf(
-                    Key(KeyAction.Language, label = modeLabel, weight = 1.2f, style = KeyStyle.FUNCTION),
-                    f(comma, KeyStyle.FUNCTION, 1.0f),
-                    f(period, KeyStyle.FUNCTION, 1.0f),
-                    icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION, 1.4f)
+                    Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION),
+                    icon(
+                        KeyAction.SendKey(android.view.KeyEvent.KEYCODE_DPAD_LEFT),
+                        R.drawable.ic_cursor_left, KeyStyle.FUNCTION
+                    ),
+                    Key(KeyAction.Space, label = "", weight = 2.0f, style = KeyStyle.SPACE),
+                    icon(
+                        KeyAction.SendKey(android.view.KeyEvent.KEYCODE_DPAD_RIGHT),
+                        R.drawable.ic_cursor_right, KeyStyle.FUNCTION
+                    ),
+                    icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION)
                 )
             )
         )
-        return KeyboardLayout(NINE, rows)
+        return KeyboardLayout(NINE, rows, rowCount = 4f)
+    }
+
+    /**
+     * 明快键盘：30 个形状键，两键取字。
+     *
+     * 键面字取自 [org.YavSoft.UniBoard.predict.MingKwaiLexicon.shapeKeys]，
+     * 由主界面按词库实际加载情况传入；一行 6 键、共 5 行，底部一行功能键。
+     */
+    fun mingkwai(keys: List<Pair<Int, String>>, modeLabel: String, chinese: Boolean): KeyboardLayout {
+        val rows = ArrayList<KeyRow>(6)
+        var index = 0
+        while (index < keys.size) {
+            val row = ArrayList<Key>(6)
+            while (row.size < 6 && index < keys.size) {
+                val (id, label) = keys[index]
+                row.add(Key(KeyAction.MingKwai(id), label = label, weight = 1f, style = KeyStyle.CHAR))
+                index++
+            }
+            rows.add(KeyRow(row))
+        }
+        rows.add(
+            KeyRow(
+                listOf(
+                    Key(KeyAction.Language, label = modeLabel, weight = 1f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.Space, label = "", weight = 1.6f, style = KeyStyle.SPACE),
+                    icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION)
+                        .copy(repeatable = true),
+                    icon(KeyAction.CycleKeyboard, R.drawable.ic_keyboard, KeyStyle.FUNCTION),
+                    icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION, 1.2f)
+                )
+            )
+        )
+        return KeyboardLayout(MINGKWAI, rows, rowCount = 5f)
     }
 
     /**
