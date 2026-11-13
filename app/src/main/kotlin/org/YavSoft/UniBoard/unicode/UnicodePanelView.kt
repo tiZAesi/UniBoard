@@ -16,8 +16,6 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
-import android.os.Handler
-import android.os.Looper
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -31,17 +29,18 @@ import org.YavSoft.UniBoard.core.sp
 import org.YavSoft.UniBoard.font.FontResolver
 import org.YavSoft.UniBoard.ui.theme.KeyboardTheme
 import org.YavSoft.UniBoard.ui.theme.KeyboardThemes
-import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
-import kotlin.math.min
 
 /**
- * Unicode 字符面板：搜索、区块浏览、码点解析与最近使用。
+ * Unicode 字符面板：**索引浏览**。
  *
- * 面板本身不弹系统键盘，输入由主键盘路由进来（见 UniBoardImeService）。
- * 每个字符都用字体回退链绘制，保证生僻字也能显示出真实字形。
+ * 与上一版的区别：
+ * - 去掉搜索框。检索改成「索引」：先选分组，再选区块，然后按格取字，
+ *   全部分类与区块都来自 [UnicodeRepository.BLOCKS]（按 Unicode 17.0 整理）；
+ * - 每格字符下面标出对应码点（如 4E00），一眼能看出编码；
+ * - 默认显示最近使用，可随时切回索引。
  */
 class UnicodePanelView @JvmOverloads constructor(
     context: Context,
@@ -51,7 +50,7 @@ class UnicodePanelView @JvmOverloads constructor(
     interface Listener {
         fun onPick(text: String)
         fun onClose()
-        /** 搜索框获得/失去焦点时通知输入法：需要弹出或收起主键盘 */
+        /** 兼容旧接口：本版没有搜索框，永远不会被调用 */
         fun onSearchFocus(active: Boolean) {}
     }
 
@@ -65,21 +64,17 @@ class UnicodePanelView @JvmOverloads constructor(
 
     private val fontResolver by lazy { FontResolver.get(context) }
     private val recents = RecentChars(context).apply { load() }
-    private val worker = Executors.newSingleThreadExecutor()
-    private val searchHandler = Handler(Looper.getMainLooper())
-    private var pendingSearch: Runnable? = null
 
-    private var query: String = ""
+    /** 当前是否处于索引（区块目录）模式 */
+    private var indexing = false
+    /** -1 表示最近使用 */
+    private var blockIndex = -1
     private var results: List<Int> = emptyList()
-    private var blockIndex: Int = -1
-    private var searching: Boolean = false
-    private var statusText: String = ""
 
     private var scrollY = 0f
     private var touchDownY = 0f
     private var dragging = false
     private var pressedCell = -1
-    private var pressProgress = 0f
     private var handleDragging = false
     private var handleStartY = 0f
 
@@ -94,7 +89,11 @@ class UnicodePanelView @JvmOverloads constructor(
     }
     private val glyphPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.LEFT
-        textSize = context.sp(23f)
+        textSize = context.sp(21f)
+    }
+    private val codePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.LEFT
+        textSize = context.sp(8.5f)
     }
     private val smallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.LEFT
@@ -102,147 +101,47 @@ class UnicodePanelView @JvmOverloads constructor(
     }
     private val baseTypeface: Typeface = Typeface.DEFAULT
     private val tmpRect = RectF()
-    // 缓存键是 (resId shl 32) or color，是 Long
     private val drawableCache = HashMap<Long, android.graphics.drawable.Drawable>(4)
 
-    /** 顶部拖拽条区域高度 */
+    /** 兼容旧接口：本版没有搜索框 */
+    var searchActive: Boolean = false
+
     private val handleHeight: Float get() = context.dp(22f)
-    private val searchTop: Float get() = handleHeight + context.dp(4f)
-    private val searchHeight: Float get() = context.dp(38f)
-    private val statusTop: Float get() = searchTop + searchHeight + context.dp(4f)
+    private val headerTop: Float get() = handleHeight + context.dp(2f)
+    private val headerHeight: Float get() = context.dp(36f)
+    private val statusTop: Float get() = headerTop + headerHeight
     private val statusHeight: Float get() = context.dp(24f)
-    private val gridTop: Float get() = statusTop + statusHeight
-    private val cellSize: Float get() = context.dp(44f)
+    private val gridTop: Float get() = statusTop + statusHeight + context.dp(2f)
+    private val cellSize: Float get() = context.dp(56f)
+    private val indexRowHeight: Float get() = context.dp(40f)
     private val columns: Int get() = max(1, (width / cellSize).toInt())
 
     private val closeRect = RectF()
-    private val searchRect = RectF()
-
-    /** 搜索框是否处于输入状态（由输入法路由按键进来） */
-    var searchActive: Boolean = false
-        set(value) {
-            if (field == value) return
-            field = value
-            invalidate()
-        }
+    private val indexRect = RectF()
+    private val prevRect = RectF()
+    private val nextRect = RectF()
 
     init {
         isClickable = true
         refreshBlock()
     }
 
-    /** 主键盘把字符路由进来 */
-    fun appendText(text: String) {
-        if (text.isEmpty()) return
-        query += text
-        onQueryChanged()
-    }
+    // ---- 兼容旧接口：不再接收键盘输入 ----
+    fun appendText(text: String) = Unit
 
-    fun backspace() {
-        if (query.isEmpty()) return
-        query = query.dropLast(1)
-        onQueryChanged()
-    }
+    fun backspace() = Unit
 
-    fun clearQuery() {
-        if (query.isEmpty()) return
-        query = ""
-        onQueryChanged()
-    }
-
-    private fun onQueryChanged() {
-        scrollY = 0f
-        if (query.isBlank()) {
-            searching = false
-            refreshBlock()
-            invalidate()
-            return
-        }
-        if (looksLikeCodePoint(query)) {
-            val cp = UnicodeRepository.parseCodePoint(query)
-            if (cp != null) {
-                showSingle(cp, false)
-                return
-            }
-            val fixed = UnicodeRepository.correctCodePoint(query)
-            if (fixed != null) {
-                showSingle(fixed, true)
-                return
-            }
-        }
-        val prefixList = UnicodeRepository.suggestByPrefix(query, 240)
-        if (prefixList.isNotEmpty()) {
-            searching = false
-            blockIndex = -1
-            results = prefixList
-            statusText = "码点联想 " + query.uppercase() + "…"
-            invalidate()
-            return
-        }
-        searching = true
-        statusText = "正在检索字符名…"
-        invalidate()
-        val q = query
-        pendingSearch?.let { searchHandler.removeCallbacks(it) }
-        val task = Runnable {
-            worker.execute {
-                val found = UnicodeRepository.searchByName(q, 160)
-                post {
-                    if (query != q) return@post
-                    searching = false
-                    blockIndex = -1
-                    results = found
-                    statusText = if (found.isEmpty()) "未找到匹配的字符" else "找到 ${found.size} 个字符"
-                    invalidate()
-                }
-            }
-        }
-        pendingSearch = task
-        searchHandler.postDelayed(task, 220)
-    }
-
-
-    /** 判断输入是否像码点：带前缀，或全十六进制且含数字 */
-    private fun looksLikeCodePoint(raw: String): Boolean {
-        val t = raw.trim().lowercase()
-        if (t.isEmpty()) return false
-        if (t.startsWith("u+") || t.startsWith("0x") || t.startsWith("&#")) return true
-        if (t.length > 6) return false
-        if (!t.all { it in "0123456789abcdef" }) return false
-        return t.any { it.isDigit() }
-    }
-
-    private fun showSingle(codePoint: Int, corrected: Boolean) {
-        searching = false
-        blockIndex = -1
-        results = listOf(codePoint)
-        val prefix = if (corrected) "已纠正为 " else ""
-        statusText = prefix + buildPreview(codePoint)
-        invalidate()
-    }
+    fun clearQuery() = Unit
 
     private fun refreshBlock() {
-        if (query.isNotEmpty()) return
+        indexing = false
         if (blockIndex < 0) {
             results = recents.list(96)
-            statusText = if (results.isEmpty()) "最近使用记录为空，可切换左侧区块浏览" else "最近使用"
         } else {
-            val block = UnicodeRepository.BLOCKS[blockIndex]
-            results = UnicodeRepository.charsInBlock(block)
-            statusText = block.name + "  " +
-                UnicodeRepository.hexLabel(block.start) + "–" + UnicodeRepository.hexLabel(block.end)
+            results = UnicodeRepository.charsInBlock(UnicodeRepository.BLOCKS[blockIndex])
         }
         scrollY = 0f
         invalidate()
-    }
-
-    private fun buildPreview(codePoint: Int): String {
-        val name = UnicodeRepository.nameOf(codePoint)
-        val cat = UnicodeRepository.categoryName(codePoint)
-        val ch = UnicodeRepository.charOf(codePoint)
-        val renderable = fontResolver.isRenderable(codePoint)
-        val tail = if (renderable) "" else "  · 当前字体无法显示"
-        return "$ch  ${UnicodeRepository.hexLabel(codePoint)}  $cat  $name$tail"
     }
 
     private fun maxScroll(): Float {
@@ -253,8 +152,22 @@ class UnicodePanelView @JvmOverloads constructor(
         return max(0f, contentHeight - viewHeight)
     }
 
+    private fun maxIndexScroll(): Float {
+        val rows = indexRows()
+        val viewHeight = height - gridTop
+        return max(0f, rows * indexRowHeight - viewHeight)
+    }
+
+    /** 索引模式的行数：分组标题各占一行 */
+    private fun indexRows(): Int {
+        var n = 0
+        for (g in UnicodeRepository.GROUPS) {
+            n += 1 + UnicodeRepository.blocksInGroup(g).size
+        }
+        return n
+    }
+
     override fun onDraw(canvas: Canvas) {
-        // 半屏圆角面板 + 顶部拖拽条
         fillPaint.color = theme.keyboardBackground
         val r = context.dp(18f)
         tmpRect.set(0f, 0f, width.toFloat(), height.toFloat() + r)
@@ -264,41 +177,39 @@ class UnicodePanelView @JvmOverloads constructor(
         val hh = context.dp(4f)
         tmpRect.set((width - hw) / 2f, context.dp(8f), (width + hw) / 2f, context.dp(8f) + hh)
         canvas.drawRoundRect(tmpRect, hh / 2f, hh / 2f, fillPaint)
-        drawSearchRow(canvas)
-        drawStatusRow(canvas)
-        drawGrid(canvas)
+
+        drawHeader(canvas)
+        drawStatus(canvas)
+        if (indexing) drawIndex(canvas) else drawGrid(canvas)
     }
 
-    private fun drawSearchRow(canvas: Canvas) {
-        val left = context.dp(8f)
-        val right = width - context.dp(46f)
-        tmpRect.set(left, searchTop, right, searchTop + searchHeight)
-        searchRect.set(tmpRect)
-        fillPaint.color = theme.keyBackground
-        val r = context.dp(10f)
-        canvas.drawRoundRect(tmpRect, r, r, fillPaint)
-        linePaint.color = if (searchActive) theme.accent else theme.divider
-        canvas.drawRoundRect(tmpRect, r, r, linePaint)
-        if (searchActive) {
-            // 光标
-            val cx = left + context.dp(10f) + (if (query.isEmpty()) 0f
-            else fontResolver.measure(query, textPaint, baseTypeface)) + context.dp(1f)
-            canvas.drawRect(cx, tmpRect.top + context.dp(9f), cx + context.dp(1.6f),
-                tmpRect.bottom - context.dp(9f), linePaint)
-        }
-
-        val textX = left + context.dp(10f)
-        textPaint.color = theme.textPrimary
+    private fun drawHeader(canvas: Canvas) {
         val fm = textPaint.fontMetrics
-        val baseline = tmpRect.centerY() - (fm.ascent + fm.descent) / 2f
-        if (query.isEmpty()) {
-            textPaint.color = theme.hintText
-            canvas.drawText("输入码点 4E00 或字符名 SNOWMAN", textX, baseline, textPaint)
-        } else {
-            fontResolver.draw(canvas, query, textX, baseline, textPaint, baseTypeface)
-        }
+        val baseline = headerTop + headerHeight / 2f - (fm.ascent + fm.descent) / 2f
 
-        closeRect.set(right + context.dp(4f), searchTop, width - context.dp(6f), searchTop + searchHeight)
+        textPaint.color = theme.textPrimary
+        textPaint.textSize = context.sp(15f)
+        canvas.drawText("Unicode 字符", context.dp(16f), baseline, textPaint)
+
+        // 索引 / 最近 切换
+        val label = if (indexing) "最近" else "索引"
+        smallPaint.textSize = context.sp(12f)
+        val tw = smallPaint.measureText(label)
+        indexRect.set(
+            width - context.dp(52f) - tw - context.dp(20f), headerTop + context.dp(5f),
+            width - context.dp(52f), headerTop + headerHeight - context.dp(5f)
+        )
+        fillPaint.color = if (indexing) theme.accent else theme.keyBackground
+        canvas.drawRoundRect(indexRect, context.dp(12f), context.dp(12f), fillPaint)
+        smallPaint.color = if (indexing) theme.onAccent else theme.textSecondary
+        val ifm = smallPaint.fontMetrics
+        canvas.drawText(
+            label, indexRect.centerX() - tw / 2f,
+            indexRect.centerY() - (ifm.ascent + ifm.descent) / 2f, smallPaint
+        )
+
+        // 关闭
+        closeRect.set(width - context.dp(48f), headerTop, width - context.dp(10f), headerTop + headerHeight)
         val d = iconDrawable(R.drawable.ic_close)
         if (d != null) {
             val size = context.dp(18f)
@@ -312,29 +223,79 @@ class UnicodePanelView @JvmOverloads constructor(
         }
     }
 
-    private fun drawStatusRow(canvas: Canvas) {
+    private fun drawStatus(canvas: Canvas) {
         val btn = context.dp(26f)
-        prevRect.set(context.dp(2f), statusTop, context.dp(2f) + btn, statusTop + statusHeight)
-        nextRect.set(width - btn - context.dp(2f), statusTop, width - context.dp(2f), statusTop + statusHeight)
+        prevRect.set(context.dp(4f), statusTop, context.dp(4f) + btn, statusTop + statusHeight)
+        nextRect.set(width - btn - context.dp(4f), statusTop, width - context.dp(4f), statusTop + statusHeight)
         val fm = smallPaint.fontMetrics
         val baseline = statusTop + statusHeight / 2f - (fm.ascent + fm.descent) / 2f
+        smallPaint.textSize = context.sp(12f)
 
-        smallPaint.color = theme.textSecondary
-        smallPaint.textAlign = Paint.Align.CENTER
-        canvas.drawText("\u25C0", prevRect.centerX(), baseline, smallPaint)
-        canvas.drawText("\u25B6", nextRect.centerX(), baseline, smallPaint)
-        smallPaint.textAlign = Paint.Align.LEFT
+        val showArrows = !indexing
+        if (showArrows) {
+            smallPaint.color = theme.textSecondary
+            smallPaint.textAlign = Paint.Align.CENTER
+            canvas.drawText("\u25C0", prevRect.centerX(), baseline, smallPaint)
+            canvas.drawText("\u25B6", nextRect.centerX(), baseline, smallPaint)
+            smallPaint.textAlign = Paint.Align.LEFT
+        }
 
         smallPaint.color = theme.hintText
-        val indicator = if (searching) "\u68C0\u7D22\u4E2D\u2026" else statusText
-        canvas.drawText(indicator, prevRect.right + context.dp(4f), baseline, smallPaint)
-
-        val blockName = if (blockIndex >= 0) UnicodeRepository.BLOCKS[blockIndex].name else ""
-        if (blockName.isNotEmpty()) {
-            smallPaint.color = theme.textSecondary
-            val w = smallPaint.measureText(blockName)
-            canvas.drawText(blockName, nextRect.left - context.dp(4f) - w, baseline, smallPaint)
+        val left = if (showArrows) prevRect.right + context.dp(6f) else context.dp(16f)
+        val title = when {
+            indexing -> "索引 · 共 ${UnicodeRepository.BLOCKS.size} 个区块 / ${UnicodeRepository.GROUPS.size} 个分组"
+            blockIndex < 0 -> if (results.isEmpty()) "最近使用为空，点右上「索引」浏览全部区块" else "最近使用"
+            else -> {
+                val b = UnicodeRepository.BLOCKS[blockIndex]
+                "${b.name}  ${UnicodeRepository.hexLabel(b.start)}–${UnicodeRepository.hexLabel(b.end)}"
+            }
         }
+        canvas.drawText(title, left, baseline, smallPaint)
+    }
+
+    private fun drawIndex(canvas: Canvas) {
+        canvas.save()
+        canvas.clipRect(0f, gridTop, width.toFloat(), height.toFloat())
+        var row = 0
+        val fm = smallPaint.fontMetrics
+        for (group in UnicodeRepository.GROUPS) {
+            val y = gridTop + row * indexRowHeight - scrollY
+            row++
+            if (y + indexRowHeight > gridTop && y < height) {
+                smallPaint.color = theme.accent
+                smallPaint.textSize = context.sp(11f)
+                val gfm = smallPaint.fontMetrics
+                canvas.drawText(
+                    group, context.dp(16f),
+                    y + indexRowHeight - context.dp(10f) - gfm.descent, smallPaint
+                )
+            }
+            for (block in UnicodeRepository.blocksInGroup(group)) {
+                val rowY = gridTop + row * indexRowHeight - scrollY
+                row++
+                if (rowY + indexRowHeight < gridTop || rowY > height) continue
+                val idx = UnicodeRepository.BLOCKS.indexOf(block)
+                if (idx == pressedCell) {
+                    tmpRect.set(
+                        context.dp(8f), rowY + context.dp(2f),
+                        width - context.dp(8f), rowY + indexRowHeight - context.dp(2f)
+                    )
+                    fillPaint.color = theme.candidateSelectedBackground
+                    canvas.drawRoundRect(tmpRect, context.dp(8f), context.dp(8f), fillPaint)
+                }
+                smallPaint.textSize = context.sp(13f)
+                smallPaint.color = theme.textPrimary
+                val sfm = smallPaint.fontMetrics
+                val base = rowY + indexRowHeight / 2f - (sfm.ascent + sfm.descent) / 2f
+                canvas.drawText(block.name, context.dp(20f), base, smallPaint)
+                smallPaint.textSize = context.sp(11f)
+                smallPaint.color = theme.hintText
+                val range = UnicodeRepository.hexLabel(block.start) + "–" + UnicodeRepository.hexLabel(block.end)
+                val rw = smallPaint.measureText(range)
+                canvas.drawText(range, width - context.dp(20f) - rw, base, smallPaint)
+            }
+        }
+        canvas.restore()
     }
 
     private fun drawGrid(canvas: Canvas) {
@@ -343,7 +304,7 @@ class UnicodePanelView @JvmOverloads constructor(
         val cell = cellSize
         canvas.save()
         canvas.clipRect(0f, gridTop, width.toFloat(), height.toFloat())
-        val fm = glyphPaint.fontMetrics
+        val gfm = glyphPaint.fontMetrics
         for (i in results.indices) {
             val row = i / cols
             val col = i % cols
@@ -358,12 +319,20 @@ class UnicodePanelView @JvmOverloads constructor(
                 fillPaint.color = theme.candidateSelectedBackground
                 canvas.drawRoundRect(tmpRect, context.dp(8f), context.dp(8f), fillPaint)
             }
-            val s = UnicodeRepository.charOf(results[i])
+            val cp = results[i]
+            val s = UnicodeRepository.charOf(cp)
             if (s.isEmpty()) continue
             val w = fontResolver.measure(s, glyphPaint, baseTypeface)
-            val baseline = y + cell / 2f - (fm.ascent + fm.descent) / 2f
+            val glyphBaseline = y + cell * 0.58f - (gfm.ascent + gfm.descent) / 2f
             glyphPaint.color = theme.textPrimary
-            fontResolver.draw(canvas, s, x + (cell - w) / 2f, baseline, glyphPaint, baseTypeface)
+            fontResolver.draw(canvas, s, x + (cell - w) / 2f, glyphBaseline, glyphPaint, baseTypeface)
+
+            // 字符下面标出码点，方便直接读编码
+            val code = cp.toString(16).uppercase().padStart(4, '0')
+            codePaint.color = theme.hintText
+            val cw = codePaint.measureText(code)
+            val cfm = codePaint.fontMetrics
+            canvas.drawText(code, x + (cell - cw) / 2f, y + cell - context.dp(6f) - cfm.descent, codePaint)
         }
         canvas.restore()
     }
@@ -378,13 +347,6 @@ class UnicodePanelView @JvmOverloads constructor(
         return d
     }
 
-    private fun cellIndexAt(y: Float): Int {
-        val localY = y + scrollY - gridTop
-        if (localY < 0f) return -1
-        val row = (localY / cellSize).toInt()
-        return row
-    }
-
     private fun hitCell(x: Float, y: Float): Int {
         if (y < gridTop) return -1
         val cols = columns
@@ -396,8 +358,22 @@ class UnicodePanelView @JvmOverloads constructor(
         return if (index in results.indices) index else -1
     }
 
-    private val prevRect = RectF()
-    private val nextRect = RectF()
+    /** 索引模式下命中的是 BLOCKS 下标 */
+    private fun hitIndexRow(y: Float): Int {
+        if (y < gridTop) return -1
+        val local = y + scrollY - gridTop
+        val row = (local / indexRowHeight).toInt()
+        var cursor = 0
+        for (group in UnicodeRepository.GROUPS) {
+            if (row == cursor) return -1      // 分组标题行
+            cursor++
+            for (block in UnicodeRepository.blocksInGroup(group)) {
+                if (row == cursor) return UnicodeRepository.BLOCKS.indexOf(block)
+                cursor++
+            }
+        }
+        return -1
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
@@ -409,7 +385,7 @@ class UnicodePanelView @JvmOverloads constructor(
                     handleStartY = event.y
                     return true
                 }
-                pressedCell = hitCell(event.x, event.y)
+                pressedCell = if (indexing) hitIndexRow(event.y) else hitCell(event.x, event.y)
                 invalidate()
                 return true
             }
@@ -424,7 +400,8 @@ class UnicodePanelView @JvmOverloads constructor(
                 }
                 if (dragging) {
                     scrollY -= event.y - touchDownY
-                    scrollY = scrollY.coerceIn(0f, maxScroll())
+                    val limit = if (indexing) maxIndexScroll() else maxScroll()
+                    scrollY = scrollY.coerceIn(0f, limit)
                     touchDownY = event.y
                     invalidate()
                 }
@@ -440,16 +417,26 @@ class UnicodePanelView @JvmOverloads constructor(
                     return true
                 }
                 if (!dragging) {
-                    if (closeRect.contains(event.x, event.y)) {
-                        listener?.onClose()
-                    } else if (prevRect.contains(event.x, event.y)) {
-                        switchBlock(-1)
-                    } else if (nextRect.contains(event.x, event.y)) {
-                        switchBlock(1)
-                    } else if (pressedCell >= 0) {
-                        val cp = results[pressedCell]
-                        recents.add(cp)
-                        listener?.onPick(UnicodeRepository.charOf(cp))
+                    when {
+                        closeRect.contains(event.x, event.y) -> listener?.onClose()
+                        indexRect.contains(event.x, event.y) -> {
+                            indexing = !indexing
+                            scrollY = 0f
+                            pressedCell = -1
+                            invalidate()
+                        }
+                        !indexing && prevRect.contains(event.x, event.y) -> switchBlock(-1)
+                        !indexing && nextRect.contains(event.x, event.y) -> switchBlock(1)
+                        indexing && pressedCell >= 0 -> {
+                            blockIndex = pressedCell
+                            indexing = false
+                            refreshBlock()
+                        }
+                        pressedCell >= 0 -> {
+                            val cp = results[pressedCell]
+                            recents.add(cp)
+                            listener?.onPick(UnicodeRepository.charOf(cp))
+                        }
                     }
                 }
                 pressedCell = -1
@@ -475,11 +462,10 @@ class UnicodePanelView @JvmOverloads constructor(
         } else {
             (blockIndex + delta + n) % n
         }
-        query = ""
+        indexing = false
         refreshBlock()
     }
 
-    /** 面板出现动画 */
     fun animateIn() {
         animate().cancel()
         alpha = 0f

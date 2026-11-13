@@ -81,6 +81,8 @@ class UniBoardImeService : InputMethodService(),
     /** 明快键盘的「魔术眼」窗口宽度：与明快打字机一致，一次列 8 个候选 */
     private val MINGKWAI_WINDOW = 8
 
+    private var keyboardPicker: org.YavSoft.UniBoard.ui.KeyboardPickerPanelView? = null
+
     /** 明快键盘已按下的上形 / 下形序号，-1 表示还没按 */
     private var mkFirst: Int = -1
     private var mkSecond: Int = -1
@@ -564,7 +566,7 @@ class UniBoardImeService : InputMethodService(),
                 )
             }
             KeyAction.RepeatLast -> repeatLastInput()
-            KeyAction.CycleKeyboard -> cycleKeyboardType()
+            KeyAction.CycleKeyboard -> openKeyboardPicker()
         }
     }
 
@@ -831,19 +833,66 @@ class UniBoardImeService : InputMethodService(),
         updateCandidates()
     }
 
-    /** 循环切换中文键盘类型：全键盘 → 九键 → 明快 */
-    private fun cycleKeyboardType() {
-        prefs.keyboardType = (prefs.keyboardType + 1) % 3
+    /** 弹出键盘选择面板（替代原来的循环切换） */
+    private fun openKeyboardPicker() {
+        val root = rootView ?: return
+        hideUnicodePanel()
+        hideClipboardPanel()
+        hideEmojiPanel()
+        hideEditPanel()
+        var panel = keyboardPicker
+        if (panel == null) {
+            panel = org.YavSoft.UniBoard.ui.KeyboardPickerPanelView(this).apply {
+                theme = this@UniBoardImeService.theme
+                listener = object : org.YavSoft.UniBoard.ui.KeyboardPickerPanelView.Listener {
+                    override fun onPick(type: Int) {
+                        applyKeyboardType(type)
+                    }
+
+                    override fun onClose() {
+                        hideKeyboardPicker()
+                    }
+                }
+            }
+            root.addView(
+                panel, 0,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            )
+            keyboardPicker = panel
+        } else {
+            panel.refresh()
+        }
+        panel.visibility = View.VISIBLE
+        panel.bringToFront()
+        syncChromeVisibility()
+    }
+
+    private fun hideKeyboardPicker() {
+        keyboardPicker?.visibility = View.GONE
+        syncChromeVisibility()
+    }
+
+    /** 选定键盘类型：九键与明快都属于中文输入，顺手切到拼音模式 */
+    private fun applyKeyboardType(type: Int) {
+        prefs.keyboardType = type
         mkFirst = -1
         mkSecond = -1
         t9Digits = ""
         composer.finishComposing()
-        refreshLayout()
-        updateCandidates()
+        hideKeyboardPicker()
+        if (type != Prefs.KB_FULL && mode != InputMode.PINYIN) {
+            setMode(InputMode.PINYIN)
+        } else {
+            refreshLayout()
+            updateCandidates()
+        }
         toast(
-            when (prefs.keyboardType) {
-                1 -> "已切换到九键（T9）键盘"
-                2 -> "已切换到明快键盘（两键取字）"
+            when (type) {
+                Prefs.KB_NINE -> "已切换到九键（T9）键盘"
+                Prefs.KB_MINGKWAI -> "已切换到明快键盘"
                 else -> "已切换到全键盘"
             }
         )
@@ -953,7 +1002,7 @@ class UniBoardImeService : InputMethodService(),
                     aiPolish()
                 }
             }
-            CandidateBar.Tool.KEYBOARD -> cycleKeyboardType()
+            CandidateBar.Tool.KEYBOARD -> openKeyboardPicker()
             CandidateBar.Tool.CURSOR_LEFT -> moveCursorBy(-1)
             CandidateBar.Tool.CURSOR_RIGHT -> moveCursorBy(1)
             CandidateBar.Tool.DELETE -> handleBackspace()
@@ -1010,6 +1059,7 @@ class UniBoardImeService : InputMethodService(),
 
     private fun openUnicodePanel() {
         val root = rootView ?: return
+        hideKeyboardPicker()
         hideClipboardPanel()
         hideEditPanel()
         var panel = unicodePanel
@@ -1055,6 +1105,7 @@ class UniBoardImeService : InputMethodService(),
 
     private fun openClipboardPanel() {
         val root = rootView ?: return
+        hideKeyboardPicker()
         hideUnicodePanel()
         hideEditPanel()
         if (prefs.clipboardKeepDays > 0) {
@@ -1234,7 +1285,7 @@ class UniBoardImeService : InputMethodService(),
 
     /** 面板打开时收起键盘与候选栏，关闭时恢复 */
     private fun syncChromeVisibility() {
-        val anyPanel = listOf(unicodePanel, clipboardPanel, emojiPanel, editPanel)
+        val anyPanel = listOf(unicodePanel, clipboardPanel, emojiPanel, editPanel, keyboardPicker)
             .any { it?.visibility == View.VISIBLE }
         // 搜索框聚焦时要留着键盘输入，其余情况面板一开就收起键盘
         val hideChrome = anyPanel && searchTarget == null

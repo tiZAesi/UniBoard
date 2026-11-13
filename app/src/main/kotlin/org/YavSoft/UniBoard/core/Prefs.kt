@@ -472,6 +472,11 @@ class Prefs(context: Context) {
         private const val K_MIXED_EN = "mixed_english"
         private const val K_GESTURE = "gesture_input"
 
+        /** 中文模式键盘类型 */
+        const val KB_FULL = 0
+        const val KB_NINE = 1
+        const val KB_MINGKWAI = 2
+
         const val MODE_UNICODE = 0
         const val MODE_PINYIN = 1
         const val MODE_LATIN = 2
