@@ -259,7 +259,7 @@ object Layouts {
     fun nineKey(modeLabel: String, chinese: Boolean): KeyboardLayout {
         fun digit(d: String, letters: String): Key = Key(
             action = KeyAction.Insert(d, letters.map { it.toString() }),
-            label = letters.ifEmpty { d },
+            label = letters.uppercase().ifEmpty { d },
             hint = if (letters.isEmpty()) null else d,
             weight = 1f,
             style = KeyStyle.CHAR
@@ -318,37 +318,49 @@ object Layouts {
     }
 
     /**
-     * 明快键盘：30 个形状键，两键取字。
+     * 明快键盘：字根键 + 两键取字。
      *
-     * 键面字取自 [org.YavSoft.UniBoard.predict.MingKwaiLexicon.shapeKeys]，
-     * 由主界面按词库实际加载情况传入；一行 6 键、共 5 行，底部一行功能键。
+     * 排版对齐常见手机键盘：一行 7 键、共 5 行（前 4 行 28 个形状键，
+     * 末行放剩下两个形状键与符号 / 空格 / 退格 / 回车 / 语言），
+     * `rowCount = 4` 让总高与其他布局一致，切换键盘时高度不跳。
+     *
+     * 键面用偏旁写法（氵、扌、亻…）并走衬线字体，与正文里的同形汉字区分开；
+     * 长按给出该形状包含的写法。
      */
-    fun mingkwai(keys: List<Pair<Int, String>>, modeLabel: String, chinese: Boolean): KeyboardLayout {
-        val rows = ArrayList<KeyRow>(6)
-        var index = 0
-        while (index < keys.size) {
-            val row = ArrayList<Key>(6)
-            while (row.size < 6 && index < keys.size) {
-                val (id, label) = keys[index]
-                row.add(Key(KeyAction.MingKwai(id), label = label, weight = 1f, style = KeyStyle.CHAR))
-                index++
-            }
-            rows.add(KeyRow(row))
-        }
-        rows.add(
-            KeyRow(
-                listOf(
-                    Key(KeyAction.Language, label = modeLabel, weight = 1f, style = KeyStyle.FUNCTION),
-                    Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION),
-                    Key(KeyAction.Space, label = "", weight = 1.6f, style = KeyStyle.SPACE),
-                    icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION)
-                        .copy(repeatable = true),
-                    icon(KeyAction.CycleKeyboard, R.drawable.ic_keyboard, KeyStyle.FUNCTION),
-                    icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION, 1.2f)
-                )
+    fun mingkwai(
+        keys: List<org.YavSoft.UniBoard.predict.MingKwaiLexicon.Shape>,
+        modeLabel: String,
+        chinese: Boolean
+    ): KeyboardLayout {
+        fun shapeKey(shape: org.YavSoft.UniBoard.predict.MingKwaiLexicon.Shape): Key {
+            val face = shape.members.firstOrNull()?.toString() ?: shape.label
+            return Key(
+                action = KeyAction.MingKwai(shape.id),
+                label = face,
+                weight = 1f,
+                style = KeyStyle.SHAPE,
+                longPressAction = KeyAction.MingKwaiHint(shape.id)
             )
-        )
-        return KeyboardLayout(MINGKWAI, rows, rowCount = 5f)
+        }
+
+        val rows = ArrayList<KeyRow>(5)
+        var index = 0
+        while (index + 7 <= keys.size) {
+            rows.add(KeyRow(keys.subList(index, index + 7).map(::shapeKey)))
+            index += 7
+        }
+        val tail = ArrayList<Key>(7)
+        while (index < keys.size) {
+            tail.add(shapeKey(keys[index]))
+            index++
+        }
+        tail.add(Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION))
+        tail.add(Key(KeyAction.Space, label = "", weight = 1.6f, style = KeyStyle.SPACE))
+        tail.add(icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION).copy(repeatable = true))
+        tail.add(icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION))
+        tail.add(Key(KeyAction.Language, label = modeLabel, weight = 1f, style = KeyStyle.FUNCTION))
+        rows.add(KeyRow(tail))
+        return KeyboardLayout(MINGKWAI, rows, rowCount = 4f)
     }
 
     /**

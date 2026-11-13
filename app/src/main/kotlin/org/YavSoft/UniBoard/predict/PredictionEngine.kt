@@ -304,7 +304,7 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
         if (!ready || digits.isEmpty()) return PredictionResult.EMPTY
         val pool = LinkedHashMap<String, Candidate>(64)
 
-        fun offer(word: String, freq: Int, exact: Boolean, bonus: Double = 0.0) {
+        fun offer(word: String, freq: Int, exact: Boolean, bonus: Double = 0.0, pinyin: String? = null) {
             if (word.isEmpty()) return
             val user = history.freqOf(word)
             var score = log10(freq.toDouble() + 10.0) * 10.0 + user * 22.0
@@ -312,23 +312,28 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
             score += word.length * 1.5 + bonus + DailyWords.bonus(word)
             val old = pool[word]
             if (old == null || old.score < score) {
-                pool[word] = Candidate(text = word, score = score, userWord = user > 0)
+                pool[word] = Candidate(
+                    text = word,
+                    hint = pinyin,
+                    score = score,
+                    userWord = user > 0
+                )
             }
         }
 
         // 0) 用户词典：拼音签名以数字串开头即算命中
         userLexicon.all().forEach { e ->
             if (e.pinyin.isNotEmpty() && T9.digits(e.pinyin).startsWith(digits)) {
-                offer(e.word, e.weight, false, 30.0)
+                offer(e.word, e.weight, false, 30.0, e.pinyin)
             }
         }
 
         // 1) 整词精确命中
-        zh.t9Exact(digits).forEach { offer(it.text, it.freq, true, 8.0) }
+        zh.t9Exact(digits).forEach { offer(it.text, it.freq, true, 8.0, it.pinyin) }
 
         // 2) 前缀命中
         if (pool.size < limit) {
-            zh.t9Prefix(digits, 240, 2).forEach { offer(it.text, it.freq, false) }
+            zh.t9Prefix(digits, 240, 2).forEach { offer(it.text, it.freq, false, 0.0, it.pinyin) }
         }
 
         // 3) 两段组合：数字串拆成两个整音节分别查词再拼接

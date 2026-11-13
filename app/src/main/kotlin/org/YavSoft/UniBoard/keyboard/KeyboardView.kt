@@ -262,12 +262,21 @@ class KeyboardView @JvmOverloads constructor(
             drawKeyIcon(canvas, key, rect)
         } else if (key.label.isNotEmpty()) {
             textPaint.color = keyLabelColor(key)
-            textPaint.textSize = context.sp(
-                if (key.style == KeyStyle.CHAR) theme.keyTextSizeSp else theme.funcTextSizeSp
-            )
+            if (key.style == KeyStyle.SHAPE) {
+                // 字根键用衬线字体 + 稍大的字号：与界面里同样写法的正文汉字区分开
+                textPaint.typeface = Typeface.SERIF
+                textPaint.textSize = context.sp(
+                    if (key.label.length > 1) theme.funcTextSizeSp - 2f else theme.keyTextSizeSp + 2f
+                )
+            } else {
+                textPaint.textSize = context.sp(
+                    if (key.style == KeyStyle.CHAR) theme.keyTextSizeSp else theme.funcTextSizeSp
+                )
+            }
             val fm = textPaint.fontMetrics
             val baseline = rect.centerY() - (fm.ascent + fm.descent) / 2f
             canvas.drawText(key.label, rect.centerX(), baseline, textPaint)
+            if (key.style == KeyStyle.SHAPE) textPaint.typeface = Typeface.DEFAULT
         }
 
         val keyHint = key.hint
@@ -299,7 +308,7 @@ class KeyboardView @JvmOverloads constructor(
     }
 
     private fun keyFill(key: Key, press: Float): Int = when (key.style) {
-        KeyStyle.CHAR, KeyStyle.SPACE ->
+        KeyStyle.CHAR, KeyStyle.SPACE, KeyStyle.SHAPE ->
             ColorUtils.blendARGB(theme.keyBackground, theme.keyPressedBackground, press.coerceIn(0f, 1f))
         KeyStyle.FUNCTION ->
             ColorUtils.blendARGB(theme.funcKeyBackground, theme.funcKeyPressedBackground, press.coerceIn(0f, 1f))
@@ -308,7 +317,7 @@ class KeyboardView @JvmOverloads constructor(
     }
 
     private fun keyLabelColor(key: Key): Int = when (key.style) {
-        KeyStyle.CHAR, KeyStyle.SPACE -> theme.textPrimary
+        KeyStyle.CHAR, KeyStyle.SPACE, KeyStyle.SHAPE -> theme.textPrimary
         KeyStyle.FUNCTION -> theme.textSecondary
         KeyStyle.ACTION -> theme.onAccent
     }

@@ -37,6 +37,13 @@ class TextComposer(private val connectionProvider: () -> InputConnection?) {
         sync()
     }
 
+    /** 用给定文本整体替换组合串（九键用拼音展示，数字只做内部编码） */
+    fun setComposing(text: String) {
+        buffer.setLength(0)
+        buffer.append(text)
+        sync()
+    }
+
     fun dropLast(): Boolean {
         if (buffer.length == 0) return false
         buffer.deleteCharAt(buffer.length - 1)

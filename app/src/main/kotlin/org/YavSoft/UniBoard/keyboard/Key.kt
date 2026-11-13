@@ -20,7 +20,9 @@ enum class KeyStyle {
     /** 主要动作键（回车）：使用强调色 */
     ACTION,
     /** 空格：宽键，可显示当前语言 */
-    SPACE
+    SPACE,
+    /** 明快键盘的字根键：衬线字体，与正文的形近字区分开 */
+    SHAPE
 }
 
 /** 按键触发的语义动作 */
@@ -88,6 +90,9 @@ sealed interface KeyAction {
 
     /** 循环切换键盘类型：全键盘 → 九键 → 明快 */
     data object CycleKeyboard : KeyAction
+
+    /** 明快键盘：长按字根键时提示该形状包含哪些写法 */
+    data class MingKwaiHint(val id: Int) : KeyAction
 }
 
 /** 单个按键定义 */

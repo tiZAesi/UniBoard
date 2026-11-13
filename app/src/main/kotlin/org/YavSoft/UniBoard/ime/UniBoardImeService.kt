@@ -75,6 +75,12 @@ class UniBoardImeService : InputMethodService(),
     /** 当前是否为明快键盘：为真时形状键走两键取字 */
     private var mkActive: Boolean = false
 
+    /** 九键内部编码：数字串只在内部使用，界面上显示拼音 */
+    private var t9Digits: String = ""
+
+    /** 明快键盘的「魔术眼」窗口宽度：与明快打字机一致，一次列 8 个候选 */
+    private val MINGKWAI_WINDOW = 8
+
     /** 明快键盘已按下的上形 / 下形序号，-1 表示还没按 */
     private var mkFirst: Int = -1
     private var mkSecond: Int = -1
@@ -324,6 +330,8 @@ class UniBoardImeService : InputMethodService(),
         kb.spaceHint = when {
             numberOnly -> null
             pcActive -> "PC 键盘"
+            mkActive -> "明快输入法"
+            nineActive -> "九键拼音"
             mode == InputMode.UNICODE -> "Unicode"
             isChineseMode -> "拼音输入"
             else -> "English"
@@ -380,12 +388,7 @@ class UniBoardImeService : InputMethodService(),
         // 明快键盘：两键取字，候选直接来自字形索引
         if (mkActive) {
             val lex = engine.mingKwai
-            val words = when {
-                mkFirst < 0 -> emptyList()
-                mkSecond < 0 -> lex.lookupFirst(mkFirst, prefs.candidateCount)
-                else -> lex.lookup(mkFirst, mkSecond, prefs.candidateCount)
-            }
-            currentCandidates = words.map { Candidate(it.text) }
+            currentCandidates = mingKwaiCandidates(MINGKWAI_WINDOW)
             correctedHint = null
             val bar = candidateBar ?: return
             bar.candidates = currentCandidates
@@ -399,14 +402,26 @@ class UniBoardImeService : InputMethodService(),
             return
         }
 
-        // 九键（T9）：组合串是数字，走数字签名匹配
-        if (nineActive && composing.isNotEmpty() && composing.all { it in '1'..'9' }) {
-            val res = engine.predictT9(composing, prefs.candidateCount)
+        // 九键（T9）：内部按数字串匹配，界面显示折算出来的拼音
+        if (nineActive && t9Digits.isEmpty()) {
+            currentCandidates = emptyList()
+            correctedHint = null
+            composer.finishComposing()
+            val bar = candidateBar ?: return
+            bar.candidates = emptyList()
+            bar.statusHint = null
+            bar.toolsVisible = true
+            return
+        }
+        if (nineActive && t9Digits.isNotEmpty()) {
+            val res = engine.predictT9(t9Digits, prefs.candidateCount)
             currentCandidates = res.candidates
             correctedHint = null
+            syncT9Composing()
             val bar = candidateBar ?: return
             bar.candidates = currentCandidates
-            bar.statusHint = buildHint(composing)
+            // 数字串只作为辅助信息放在状态位
+            bar.statusHint = t9Digits
             bar.toolsVisible = currentCandidates.isEmpty()
             showCandidateBar()
             return
@@ -540,6 +555,14 @@ class UniBoardImeService : InputMethodService(),
             KeyAction.AiPolish -> aiPolish()
             KeyAction.AiSuggest -> aiSuggest()
             is KeyAction.MingKwai -> handleMingKwai(action.id)
+            is KeyAction.MingKwaiHint -> {
+                val shape = engine.mingKwai.shapeKeys.getOrNull(action.id)
+                val members = shape?.members.orEmpty()
+                toast(
+                    if (members.isEmpty()) "字根：${shape?.label.orEmpty()}"
+                    else "字根「${shape?.label.orEmpty()}」含写法：${members.toCharArray().joinToString(" ")}"
+                )
+            }
             KeyAction.RepeatLast -> repeatLastInput()
             KeyAction.CycleKeyboard -> cycleKeyboardType()
         }
@@ -568,9 +591,9 @@ class UniBoardImeService : InputMethodService(),
             commitDirect(text)
             return
         }
-        // 九键：数字键代表一串拼音字母，先进组合串再由 predictT9 折算
+        // 九键：数字键只是编码，界面显示折算出来的拼音
         if (nineActive && text.length == 1 && text[0] in '1'..'9') {
-            composer.append(text)
+            t9Digits += text
             updateCandidates()
             return
         }
@@ -612,6 +635,11 @@ class UniBoardImeService : InputMethodService(),
     }
 
     private fun handleBackspace() {
+        if (nineActive && t9Digits.isNotEmpty()) {
+            t9Digits = t9Digits.dropLast(1)
+            updateCandidates()
+            return
+        }
         if (mkActive && (mkFirst >= 0 || mkSecond >= 0)) {
             if (mkSecond >= 0) mkSecond = -1 else mkFirst = -1
             updateCandidates()
@@ -729,6 +757,9 @@ class UniBoardImeService : InputMethodService(),
 
     private fun setMode(next: InputMode) {
         composer.finishComposing()
+        t9Digits = ""
+        mkFirst = -1
+        mkSecond = -1
         mode = next
         prefs.defaultMode = when (next) {
             InputMode.PINYIN -> Prefs.MODE_PINYIN
@@ -743,11 +774,37 @@ class UniBoardImeService : InputMethodService(),
         updateCandidates()
     }
 
+    /** 明快候选：取 8 字窗口，本机用得多的字往前排 */
+    private fun mingKwaiCandidates(limit: Int): List<Candidate> {
+        val lex = engine.mingKwai
+        val raw = when {
+            mkFirst < 0 -> emptyList()
+            mkSecond < 0 -> lex.lookupFirst(mkFirst, 32)
+            else -> lex.lookup(mkFirst, mkSecond, 32)
+        }
+        if (raw.isEmpty()) return emptyList()
+        return raw
+            .map { Candidate(it.text, score = it.freq.toDouble() + engine.userFreq(it.text) * 8000.0) }
+            .sortedByDescending { it.score }
+            .take(limit)
+    }
+
+    /** 九键：把最优候选的拼音写进组合区，数字只留在状态位 */
+    private fun syncT9Composing() {
+        if (!nineActive) return
+        if (t9Digits.isEmpty()) {
+            composer.finishComposing()
+            return
+        }
+        val pinyin = currentCandidates.firstOrNull()?.hint
+        composer.setComposing(pinyin ?: "")
+    }
+
     /** 明快键盘布局：形状键来自词库，词库未就绪时退回全键盘 */
     private fun mingKwaiLayout(): KeyboardLayout {
         val lex = engine.mingKwai
         if (!lex.isLoaded) return Layouts.buildLatin(upper = false, chinese = isChineseMode, numberRow = false)
-        return Layouts.mingkwai(lex.shapeKeys.map { it.id to it.label }, modeLabel(), isChineseMode)
+        return Layouts.mingkwai(lex.shapeKeys, modeLabel(), isChineseMode)
     }
 
     /** 明快键盘：第一键记上形，第二键记下形，第三键起重新开始 */
@@ -779,6 +836,8 @@ class UniBoardImeService : InputMethodService(),
         prefs.keyboardType = (prefs.keyboardType + 1) % 3
         mkFirst = -1
         mkSecond = -1
+        t9Digits = ""
+        composer.finishComposing()
         refreshLayout()
         updateCandidates()
         toast(
@@ -814,7 +873,16 @@ class UniBoardImeService : InputMethodService(),
             lastWord = word
             mkFirst = -1
             mkSecond = -1
-            updateCandidates()
+            // 与拼音一致：上屏后接一段联想词，直接点即可续写
+            val next = if (prefs.nextWordPredict) engine.suggestNext(word, MINGKWAI_WINDOW) else emptyList()
+            if (next.isEmpty()) {
+                updateCandidates()
+            } else {
+                currentCandidates = next
+                candidateBar?.candidates = next
+                candidateBar?.statusHint = "明快：联想"
+                candidateBar?.toolsVisible = false
+            }
             return
         }
         if (prefs.learningEnabled && !prefs.privacyMode && !secureInput) {
@@ -829,6 +897,10 @@ class UniBoardImeService : InputMethodService(),
         }
         lastWord = word
         correctedHint = null
+        if (nineActive) {
+            t9Digits = ""
+            composer.finishComposing()
+        }
         currentCandidates = engine.suggestNext(word)
         candidateBar?.candidates = currentCandidates
         candidateBar?.statusHint = buildHint("")

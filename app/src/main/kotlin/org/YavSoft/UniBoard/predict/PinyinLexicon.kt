@@ -22,7 +22,7 @@ import java.io.BufferedReader
  */
 class PinyinLexicon {
 
-    data class Word(val text: String, val freq: Int)
+    data class Word(val text: String, val freq: Int, val pinyin: String = "")
 
     private var keys: Array<String> = emptyArray()
     private var buckets: Array<List<Word>> = emptyArray()
@@ -106,7 +106,8 @@ class PinyinLexicon {
         val out = ArrayList<Word>(8)
         var i = t9LowerBound(digits)
         while (i < t9Order.size && t9Sigs[t9Order[i]] == digits) {
-            out.addAll(buckets[t9Order[i]])
+            val py = keys[t9Order[i]]
+            buckets[t9Order[i]].forEach { out.add(Word(it.text, it.freq, py)) }
             i++
         }
         return out
@@ -121,9 +122,10 @@ class PinyinLexicon {
         while (i < t9Order.size && scanned < maxKeys) {
             if (!t9Sigs[t9Order[i]].startsWith(digits)) break
             val bucket = buckets[t9Order[i]]
+            val py = keys[t9Order[i]]
             var n = 0
             while (n < bucket.size && n < perKey) {
-                out.add(bucket[n])
+                out.add(Word(bucket[n].text, bucket[n].freq, py))
                 n++
             }
             i++
