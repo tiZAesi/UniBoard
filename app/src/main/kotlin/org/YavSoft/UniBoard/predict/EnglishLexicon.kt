@@ -51,6 +51,18 @@ class EnglishLexicon {
         node.freq = freq
     }
 
+    /** 遍历全部词条（滑行输入解码用；按字典序，不保证顺序语义） */
+    fun forEachWord(action: (String, Int) -> Unit) {
+        if (wordCount == 0) return
+        val stack = ArrayDeque<Node>()
+        stack.addLast(root)
+        while (stack.isNotEmpty()) {
+            val node = stack.removeLast()
+            node.word?.let { action(it, node.freq) }
+            for (child in node.children.values) stack.addLast(child)
+        }
+    }
+
     /** 前缀联想：返回以 prefix 开头的词，按词频降序 */
     fun prefix(prefix: String, limit: Int = 24): List<Word> {
         if (wordCount == 0) return emptyList()

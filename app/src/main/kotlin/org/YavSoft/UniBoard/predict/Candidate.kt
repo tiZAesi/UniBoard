@@ -23,6 +23,8 @@ data class Candidate(
     val corrected: Boolean = false,
     /** 是否来自用户词库 */
     val userWord: Boolean = false,
+    /** 是否为内联的英文候选（提交时补一个空格，与英文模式一致） */
+    val english: Boolean = false,
     /** 排序权重（内部使用） */
     val score: Double = 0.0
 )

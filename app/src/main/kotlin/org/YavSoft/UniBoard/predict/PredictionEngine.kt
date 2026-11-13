@@ -157,6 +157,21 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
                 .forEach { offer(it.text, it.freq, false, false, -4.0) }
         }
 
+        // 3.5) 中英混输：输入的拼音串恰好也是英文词前缀时，内联少量英文候选
+        if (prefs.mixedEnglish && py.length >= 2 && pool.size < limit) {
+            var added = 0
+            en.prefix(py, 12).forEach { w ->
+                if (added >= 3) return@forEach
+                if (pool.containsKey(w.text)) return@forEach
+                pool[w.text] = Candidate(
+                    text = w.text,
+                    score = 12.0 + log10(w.freq.toDouble() + 10.0) * 4.0,
+                    english = true
+                )
+                added++
+            }
+        }
+
         // 4) 双段组合：woai + beijing -> 我爱北京（只在直接命中不足时兜底）
         if (pool.size < limit) {
             combineTwoSegments(py, limit) { w, f -> offer(w, f, false, false, -8.0) }
@@ -268,6 +283,77 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
             }
         }
         return sb.toString()
+    }
+
+    /**
+     * 九键（T9）拼音预测。
+     *
+     * 输入是数字串（2–9），逐个数字对应三到四个字母，因此候选天然比全拼多，
+     * 排序也更依赖词频：先给整词精确命中，再补前缀，最后才拆两段拼短语。
+     */
+    fun predictT9(digits: String, limit: Int = 30): PredictionResult {
+        if (!ready || digits.isEmpty()) return PredictionResult.EMPTY
+        val pool = LinkedHashMap<String, Candidate>(64)
+
+        fun offer(word: String, freq: Int, exact: Boolean, bonus: Double = 0.0) {
+            if (word.isEmpty()) return
+            val user = history.freqOf(word)
+            var score = log10(freq.toDouble() + 10.0) * 10.0 + user * 22.0
+            if (exact) score += 22.0
+            score += word.length * 1.5 + bonus + DailyWords.bonus(word)
+            val old = pool[word]
+            if (old == null || old.score < score) {
+                pool[word] = Candidate(text = word, score = score, userWord = user > 0)
+            }
+        }
+
+        // 0) 用户词典：拼音签名以数字串开头即算命中
+        userLexicon.all().forEach { e ->
+            if (e.pinyin.isNotEmpty() && T9.digits(e.pinyin).startsWith(digits)) {
+                offer(e.word, e.weight, false, 30.0)
+            }
+        }
+
+        // 1) 整词精确命中
+        zh.t9Exact(digits).forEach { offer(it.text, it.freq, true, 8.0) }
+
+        // 2) 前缀命中
+        if (pool.size < limit) {
+            zh.t9Prefix(digits, 240, 2).forEach { offer(it.text, it.freq, false) }
+        }
+
+        // 3) 两段组合：数字串拆成两个整音节分别查词再拼接
+        if (pool.size < limit) combineT9(digits, limit) { w, f -> offer(w, f, false, -6.0) }
+
+        val sorted = pool.values.sortedByDescending { it.score }.take(limit)
+        return PredictionResult(sorted)
+    }
+
+    /** 数字串拆两段：94664 26 -> 「中」+「国」这类组合 */
+    private fun combineT9(digits: String, limit: Int, emit: (String, Int) -> Unit) {
+        if (digits.length < 4) return
+        var produced = 0
+        val upper = minOf(digits.length - 2, 8)
+        for (cut in 2..upper) {
+            if (produced >= limit) break
+            val left = zh.t9Exact(digits.substring(0, cut)).take(2)
+            if (left.isEmpty()) continue
+            val right = zh.t9Exact(digits.substring(cut)).take(2)
+            if (right.isEmpty()) continue
+            for (l in left) {
+                for (r in right) {
+                    if (produced >= limit) break
+                    emit(l.text + r.text, minOf(l.freq, r.freq) / 3)
+                    produced++
+                }
+            }
+        }
+    }
+
+    /** 滑行输入解码：把经过的按键字母交给 [GestureDecoder] */
+    fun decodeGlide(letters: List<String>, limit: Int = 8): List<Candidate> {
+        if (!ready) return emptyList()
+        return GestureDecoder.decode(letters, en, limit)
     }
 
     private fun predictLatin(input: String, limit: Int): PredictionResult {

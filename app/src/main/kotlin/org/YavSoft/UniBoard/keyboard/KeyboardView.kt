@@ -59,6 +59,8 @@ class KeyboardView @JvmOverloads constructor(
         fun onKey(action: KeyAction)
         /** 空格左右滑动移动光标，offset 为 ±1 */
         fun onMoveCursor(offset: Int)
+        /** 滑行输入：手指依次划过的字母键（小写，相邻已去重） */
+        fun onGlide(letters: List<String>) {}
     }
 
     var listener: Listener? = null
@@ -121,7 +123,12 @@ class KeyboardView @JvmOverloads constructor(
         var popupItemWidth = 0f
         var swiped = false
         var downX = 0f
+        var downY = 0f
         var lastX = 0f
+        /** 是否已判定为滑行输入 */
+        var glide = false
+        /** 滑行经过的字母序列 */
+        val letters = ArrayList<String>(8)
     }
 
     private var pressed: PressedState? = null
@@ -263,6 +270,19 @@ class KeyboardView @JvmOverloads constructor(
             canvas.drawText(key.label, rect.centerX(), baseline, textPaint)
         }
 
+        val keyHint = key.hint
+        if (!keyHint.isNullOrEmpty()) {
+            hintPaint.color = theme.hintText
+            hintPaint.textSize = context.sp(theme.hintTextSizeSp)
+            hintPaint.textAlign = Paint.Align.RIGHT
+            val fm = hintPaint.fontMetrics
+            canvas.drawText(
+                keyHint, rect.right - context.dp(6f),
+                rect.bottom - context.dp(4f) - fm.descent, hintPaint
+            )
+            hintPaint.textAlign = Paint.Align.CENTER
+        }
+
         if (key.style == KeyStyle.SPACE) {
             val hint = spaceHint
             if (!hint.isNullOrEmpty()) {
@@ -382,6 +402,17 @@ class KeyboardView @JvmOverloads constructor(
         canvas.restore()
     }
 
+    /** 键帽若代表单个英文字母，返回其小写形式；功能键/符号键返回 null */
+    private fun letterOf(key: Key): String? {
+        val text = (key.action as? KeyAction.Insert)?.text ?: return null
+        if (text.length != 1) return null
+        val ch = text[0]
+        if (ch.code >= 128 || !ch.isLetter()) return null
+        return ch.lowercaseChar().toString()
+    }
+
+    private fun isLetterKey(key: Key): Boolean = letterOf(key) != null
+
     private fun hitTest(x: Float, y: Float): Hit? {
         for (hit in hits) {
             if (hit.rect.contains(x, y)) return hit
@@ -404,7 +435,9 @@ class KeyboardView @JvmOverloads constructor(
         pressAnimator?.cancel()
         val p = PressedState(hit)
         p.downX = event.x
+        p.downY = event.y
         p.lastX = event.x
+        letterOf(hit.key)?.let { p.letters.add(it) }
         pressed = p
         animatePress(p, true)
         feedback(hit.key)
@@ -444,6 +477,25 @@ class KeyboardView @JvmOverloads constructor(
                 return
             }
         }
+        // 滑行输入：起手在字母键上、位移超过阈值后转入轨迹收集，
+        // 此后不再按「移出键帽即取消」处理，否则一笔划过必然中途被取消。
+        if (prefs.gestureInput && !p.popupShown) {
+            if (!p.glide) {
+                val moved = abs(event.x - p.downX) + abs(event.y - p.downY) > context.dp(10f)
+                if (moved && isLetterKey(p.hit.key)) {
+                    p.glide = true
+                    removeCallbacks(longPressRunnable)
+                }
+            }
+            if (p.glide) {
+                val letter = hitTest(event.x, event.y)?.let { letterOf(it.key) }
+                if (!letter.isNullOrEmpty() && (p.letters.isEmpty() || p.letters.last() != letter)) {
+                    p.letters.add(letter)
+                    invalidate()
+                }
+                return
+            }
+        }
         if (!p.longPressFired && hitTest(event.x, event.y) !== p.hit) {
             handleCancel()
         }
@@ -453,6 +505,16 @@ class KeyboardView @JvmOverloads constructor(
         val p = pressed ?: return
         removeCallbacks(longPressRunnable)
         stopRepeat()
+        if (p.glide) {
+            // 滑行结束：把整条轨迹交给上层解码，不再触发按下键本身的动作
+            val letters = p.letters.toList()
+            p.glide = false
+            pressed = null
+            releasePress(p)
+            if (letters.size >= 2) listener?.onGlide(letters)
+            performClick()
+            return
+        }
         if (p.popupShown) {
             val items = popupItems(p.hit.key)
             val text = items.getOrNull(p.popupIndex)

@@ -33,6 +33,7 @@ object Layouts {
     const val NUMPAD = "numpad"
     const val UNICODE_PAD = "unicode_pad"
     const val PC = "pc"
+    const val NINE = "nine"
 
     /** 长按备选字符表（拉丁字母的变体与重音形式） */
     private val ACCENTS: Map<String, List<String>> = mapOf(
@@ -242,6 +243,43 @@ object Layouts {
             )
         )
         return KeyboardLayout(NUMPAD, rows)
+    }
+
+    /**
+     * 九键（T9）拼音键盘。
+     *
+     * 数字键 2–9 各带三到四个字母，按下的数字进入组合串，
+     * 由 [org.YavSoft.UniBoard.predict.PredictionEngine.predictT9] 折算回拼音候选。
+     * 键帽右下角的小字（hint）即该键承担的字母，与功能机习惯一致。
+     */
+    fun nineKey(modeLabel: String, chinese: Boolean): KeyboardLayout {
+        fun d(digit: String, letters: String): Key =
+            Key(KeyAction.Insert(digit), label = digit, hint = letters, weight = 1f, style = KeyStyle.CHAR)
+
+        val comma = if (chinese) "，" else ","
+        val period = if (chinese) "。" else "."
+        val rows = listOf(
+            KeyRow(listOf(d("1", ""), d("2", "abc"), d("3", "def"))),
+            KeyRow(listOf(d("4", "ghi"), d("5", "jkl"), d("6", "mno"))),
+            KeyRow(listOf(d("7", "pqrs"), d("8", "tuv"), d("9", "wxyz"))),
+            KeyRow(
+                listOf(
+                    Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1.2f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.Space, label = "", weight = 2.0f, style = KeyStyle.SPACE),
+                    icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION, 1.2f)
+                        .copy(repeatable = true)
+                )
+            ),
+            KeyRow(
+                listOf(
+                    Key(KeyAction.Language, label = modeLabel, weight = 1.2f, style = KeyStyle.FUNCTION),
+                    f(comma, KeyStyle.FUNCTION, 1.0f),
+                    f(period, KeyStyle.FUNCTION, 1.0f),
+                    icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION, 1.4f)
+                )
+            )
+        )
+        return KeyboardLayout(NINE, rows)
     }
 
     /**

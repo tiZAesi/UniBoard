@@ -67,6 +67,9 @@ class UniBoardImeService : InputMethodService(),
 
     private var mode: InputMode = InputMode.PINYIN
     private var layoutId: String = Layouts.LATIN
+
+    /** 当前是否为九键（T9）拼音键盘：为真时数字键进入组合串并走数字预测 */
+    private var nineActive: Boolean = false
     private var shiftOn: Boolean = false
     /** 是否切到了 PC 键盘 */
     private var pcActive = false
@@ -289,9 +292,14 @@ class UniBoardImeService : InputMethodService(),
             mode == InputMode.UNICODE -> Layouts.unicodePad(modeLabel(), isChineseMode)
             layoutId == Layouts.SYMBOLS -> Layouts.symbols(isChineseMode)
             layoutId == Layouts.SYMBOLS_MORE -> Layouts.symbolsMore(isChineseMode)
+            layoutId == Layouts.NINE -> Layouts.nineKey(modeLabel(), isChineseMode)
             shiftOn -> Layouts.buildLatin(upper = true, chinese = isChineseMode, numberRow = prefs.numberRow)
+            // 中文模式下可在设置里切到九键；符号页、英文模式仍走全键盘
+            mode == InputMode.PINYIN && prefs.nineKeyPinyin ->
+                Layouts.nineKey(modeLabel(), isChineseMode)
             else -> Layouts.buildLatin(upper = false, chinese = isChineseMode, numberRow = prefs.numberRow)
         }
+        nineActive = layout.id == Layouts.NINE
         kb.setLayout(layout)
         kb.shiftLocked = shiftOn
         kb.spaceHint = when {
@@ -349,6 +357,19 @@ class UniBoardImeService : InputMethodService(),
             return
         }
         codeNote = null
+
+        // 九键（T9）：组合串是数字，走数字签名匹配
+        if (nineActive && composing.isNotEmpty() && composing.all { it in '1'..'9' }) {
+            val res = engine.predictT9(composing, prefs.candidateCount)
+            currentCandidates = res.candidates
+            correctedHint = null
+            val bar = candidateBar ?: return
+            bar.candidates = currentCandidates
+            bar.statusHint = buildHint(composing)
+            bar.toolsVisible = currentCandidates.isEmpty()
+            showCandidateBar()
+            return
+        }
 
         val result = if (composing.isNotEmpty()) {
             engine.predict(composing, mode, prefs.candidateCount)
@@ -501,6 +522,12 @@ class UniBoardImeService : InputMethodService(),
             // 标点等非编码键：先把当前码点对应的字上屏，再接标点
             if (composer.isComposing) commitFirstCandidate()
             commitDirect(text)
+            return
+        }
+        // 九键：数字键代表一串拼音字母，先进组合串再由 predictT9 折算
+        if (nineActive && text.length == 1 && text[0] in '1'..'9') {
+            composer.append(text)
+            updateCandidates()
             return
         }
         val asciiLetter = text.length == 1 && text[0].code < 128 && text[0].isLetter()
@@ -679,7 +706,8 @@ class UniBoardImeService : InputMethodService(),
             engine.noteCommit(word, lastWord)
             learnWord(word)
         }
-        if (mode == InputMode.LATIN) {
+        // 英文候选（英文模式或中英混输内联的英文词）提交后补一个空格
+        if (mode == InputMode.LATIN || c.english) {
             composer.commit("$word ")
         } else {
             composer.commit(word)
@@ -697,6 +725,31 @@ class UniBoardImeService : InputMethodService(),
 
     override fun onMoveCursor(offset: Int) {
         composer.moveCursor(offset)
+    }
+
+    /**
+     * 滑行输入：把轨迹交给词库解码，命中即直接上屏；
+     * 同时把其余候选放进候选栏，误判时可以改选。
+     */
+    override fun onGlide(letters: List<String>) {
+        if (!prefs.gestureInput || letters.size < 2) return
+        val words = engine.decodeGlide(letters, prefs.candidateCount)
+        if (words.isEmpty()) {
+            toast("未识别到手势，可稍慢一些或改用点击输入")
+            return
+        }
+        val best = words.first()
+        val word = best.text
+        if (prefs.learningEnabled && !prefs.privacyMode && !secureInput) {
+            engine.noteCommit(word, lastWord)
+            learnWord(word)
+        }
+        composer.commit(if (mode == InputMode.LATIN) "$word " else word)
+        lastWord = word
+        correctedHint = null
+        currentCandidates = words.drop(1)
+        candidateBar?.candidates = currentCandidates
+        candidateBar?.statusHint = buildHint("")
     }
 
     override fun onToolClick(tool: CandidateBar.Tool) {
@@ -823,9 +876,17 @@ class UniBoardImeService : InputMethodService(),
         if (panel == null) {
             panel = org.YavSoft.UniBoard.clip.ClipboardPanelView(this).apply {
                 this.theme = this@UniBoardImeService.theme
+                currentPackage = currentInputEditorInfo?.packageName
                 listener = object : org.YavSoft.UniBoard.clip.ClipboardPanelView.Listener {
                     override fun onPaste(text: String) {
-                        commitDirect(text)
+                        val quick = org.YavSoft.UniBoard.clip.QuickPhrases(this@UniBoardImeService)
+                        if (quick.contains(text)) {
+                            // 常用语：展开 {date}/{time}/{datetime}/{clip}，并记录本应用使用次数
+                            quick.noteUse(currentInputEditorInfo?.packageName, text)
+                            commitDirect(quick.render(text, clipboardText()))
+                        } else {
+                            commitDirect(text)
+                        }
                         hideClipboardPanel()
                     }
 
@@ -843,6 +904,7 @@ class UniBoardImeService : InputMethodService(),
             root.addView(panel, 0, panelParams())
             clipboardPanel = panel
         }
+        panel.currentPackage = currentInputEditorInfo?.packageName
         panel.refresh()
         panel.layoutParams = panelParams()
         panel.visibility = View.VISIBLE
@@ -1005,6 +1067,13 @@ class UniBoardImeService : InputMethodService(),
     private fun toast(msg: String) {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
+
+    /** 当前系统剪贴板文本，供常用语的 {clip} 变量展开 */
+    private fun clipboardText(): String? = runCatching {
+        val cm = getSystemService(android.content.ClipboardManager::class.java)
+        cm?.primaryClip?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)?.coerceToText(this)?.toString()
+    }.getOrNull()
 
     /** AI 润色：优先处理选中文字，其次当前组合串，最后取光标前一段 */
     private fun privacyBlocked(): Boolean {

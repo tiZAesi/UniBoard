@@ -72,6 +72,9 @@ class ClipboardPanelView @JvmOverloads constructor(
     private val searchRect = RectF()
 
     private var currentClip: String? = null
+
+    /** 当前编辑框所属应用包名，用于「本应用」常用语分组 */
+    var currentPackage: String? = null
     private var saved: List<String> = emptyList()
     private var recent: List<ClipStore.Item> = emptyList()
     private var quick: List<String> = emptyList()
@@ -162,7 +165,12 @@ class ClipboardPanelView @JvmOverloads constructor(
             }
         }
 
-        addGroup(0, quick.map { it to "常用语" })
+        val appPhrases = if (currentPackage.isNullOrEmpty()) emptyList()
+        else phrases.recentForPackage(currentPackage, 4).filter { matches(it) }
+        if (appPhrases.isNotEmpty()) {
+            addGroup(0, appPhrases.map { it to "本应用" })
+        }
+        addGroup(0, quick.filter { it !in appPhrases }.map { it to "常用语" })
         addGroup(1, listOfNotNull(currentClip?.let { it to "系统剪贴板" }))
         addGroup(2, saved.map { it to "收藏" })
         addGroup(3, recent.map {

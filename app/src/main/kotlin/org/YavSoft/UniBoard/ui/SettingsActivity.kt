@@ -161,6 +161,10 @@ class SettingsActivity : SettingsBase() {
         subtitle("默认使用 Unicode 直输盘，通过输入十六进制码点选择字符。")
         section("默认输入模式")
         val c1 = card()
+        toggle(c1, "九键拼音键盘", "中文模式下使用九键（T9）布局，单手更省力", prefs.nineKeyPinyin) {
+            prefs.nineKeyPinyin = it
+            recreate()
+        }
         choice(c1, listOf("Unicode 直输", "中文拼音", "英文"), prefs.defaultMode.coerceIn(0, 2)) {
             prefs.defaultMode = it
             recreate()
@@ -249,6 +253,9 @@ class SettingsActivity : SettingsBase() {
         })
         section("按键行为")
         val c3 = card()
+        toggle(c3, "滑行输入", "在字母键上一笔划过若干个键即可出词", prefs.gestureInput) {
+            prefs.gestureInput = it
+        }
         toggle(c3, "字母行常驻数字", "拼音与英文键盘顶部增加数字行", prefs.numberRow) {
             prefs.numberRow = it
         }
@@ -284,6 +291,9 @@ class SettingsActivity : SettingsBase() {
         val c2 = card()
         slider(c2, "候选词数量", 4f, 12f, 1f, prefs.candidateCount.toFloat()) {
             prefs.candidateCount = it.toInt()
+        }
+        toggle(c2, "中英混输", "拼音候选中内联英文词，免去切换输入模式", prefs.mixedEnglish) {
+            prefs.mixedEnglish = it
         }
         toggle(c2, "联想词", "提交候选后提示后续词语", prefs.nextWordPredict) {
             prefs.nextWordPredict = it

@@ -59,6 +59,7 @@ object SettingsIndex {
 
         // 键盘布局与手感
         keyboard("默认输入模式", "unicode 直输 拼音 英文 码点"),
+        keyboard("九键拼音键盘", "九键 t9 数字 布局 单手"),
         keyboard("键盘高度", "尺寸 高度 height"),
         keyboard("按键圆角", "尺寸 圆角 radius"),
         keyboard("面板高度", "面板 半屏 panel"),
@@ -77,6 +78,7 @@ object SettingsIndex {
         keyboard("剪贴板面板", "工具栏 剪贴板 clipboard"),
         keyboard("AI 润色", "工具栏 ai 润色"),
         keyboard("文本编辑面板", "工具栏 光标 全选 复制 粘贴"),
+        keyboard("滑行输入", "滑行 glide 手势 连写 swipe"),
         keyboard("字母行常驻数字", "数字行 顶部 数字"),
         keyboard("长按弹出备选字符", "重音 备选 长按 popup"),
         keyboard("空格滑动移动光标", "空格 光标 滑动"),
@@ -88,6 +90,7 @@ object SettingsIndex {
         input("中文模糊音", "模糊音 zh z n l an ang"),
         input("简拼输入", "简拼 zg 首字母"),
         input("候选词数量", "候选 数量"),
+        input("中英混输", "中英 英文 混输 内联 mixed"),
         input("联想词", "联想 下个词 predict"),
         input("学习输入习惯", "学习 词频 上下文 记录"),
         input("完整码点自动上屏", "unicode 码点 上屏 自动提交"),

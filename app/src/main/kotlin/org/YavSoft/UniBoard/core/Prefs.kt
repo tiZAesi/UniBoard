@@ -240,6 +240,21 @@ class Prefs(context: Context) {
         get() = readBool(K_INITIALS, true)
         set(v) = sp.edit().putBoolean(K_INITIALS, v).apply()
 
+    /** 中文模式下使用九键（T9）拼音键盘，而不是全键盘 */
+    var nineKeyPinyin: Boolean
+        get() = readBool(K_NINE_KEY, false)
+        set(v) = sp.edit().putBoolean(K_NINE_KEY, v).apply()
+
+    /** 中英混输：拼音候选里内联英文词，免去切换输入模式 */
+    var mixedEnglish: Boolean
+        get() = readBool(K_MIXED_EN, true)
+        set(v) = sp.edit().putBoolean(K_MIXED_EN, v).apply()
+
+    /** 滑行输入：在字母键上一笔划过若干键直接出词 */
+    var gestureInput: Boolean
+        get() = readBool(K_GESTURE, true)
+        set(v) = sp.edit().putBoolean(K_GESTURE, v).apply()
+
     /** 拼音候选数量 */
     var candidateCount: Int
         get() = readInt(K_CAND_COUNT, 8)
@@ -426,6 +441,9 @@ class Prefs(context: Context) {
         private const val K_NEXT_WORD = "next_word_predict"
         private const val K_LEARNING = "learning_enabled"
         private const val K_INITIALS = "initials_enabled"
+        private const val K_NINE_KEY = "nine_key_pinyin"
+        private const val K_MIXED_EN = "mixed_english"
+        private const val K_GESTURE = "gesture_input"
 
         const val MODE_UNICODE = 0
         const val MODE_PINYIN = 1

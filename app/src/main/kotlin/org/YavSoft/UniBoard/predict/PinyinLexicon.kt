@@ -27,6 +27,10 @@ class PinyinLexicon {
     private var keys: Array<String> = emptyArray()
     private var buckets: Array<List<Word>> = emptyArray()
 
+    /** 九键索引：与 [keys] 平行的数字签名，以及按签名排序的下标 */
+    private var t9Sigs: Array<String> = emptyArray()
+    private var t9Order: IntArray = IntArray(0)
+
     val size: Int get() = keys.size
     val isLoaded: Boolean get() = keys.isNotEmpty()
 
@@ -61,6 +65,10 @@ class PinyinLexicon {
         }
         keys = keyList.toTypedArray()
         buckets = bucketList.toTypedArray()
+
+        // 九键索引：每个拼音串折算成数字签名，再按签名排序，供前缀二分查找
+        t9Sigs = Array(keys.size) { T9.digits(keys[it]) }
+        t9Order = t9Sigs.indices.sortedBy { t9Sigs[it] }.toIntArray()
     }
 
     /** 精确拼音匹配 */
@@ -90,6 +98,48 @@ class PinyinLexicon {
             scanned++
         }
         return out
+    }
+
+    /** 九键精确匹配：数字串与整词拼音签名完全一致 */
+    fun t9Exact(digits: String): List<Word> {
+        if (t9Order.isEmpty() || digits.isEmpty()) return emptyList()
+        val out = ArrayList<Word>(8)
+        var i = t9LowerBound(digits)
+        while (i < t9Order.size && t9Sigs[t9Order[i]] == digits) {
+            out.addAll(buckets[t9Order[i]])
+            i++
+        }
+        return out
+    }
+
+    /** 九键前缀匹配：数字串是整词签名前缀时给出候选 */
+    fun t9Prefix(digits: String, maxKeys: Int = 200, perKey: Int = 2): List<Word> {
+        if (t9Order.isEmpty() || digits.isEmpty()) return emptyList()
+        val out = ArrayList<Word>(perKey * 24)
+        var i = t9LowerBound(digits)
+        var scanned = 0
+        while (i < t9Order.size && scanned < maxKeys) {
+            if (!t9Sigs[t9Order[i]].startsWith(digits)) break
+            val bucket = buckets[t9Order[i]]
+            var n = 0
+            while (n < bucket.size && n < perKey) {
+                out.add(bucket[n])
+                n++
+            }
+            i++
+            scanned++
+        }
+        return out
+    }
+
+    private fun t9LowerBound(target: String): Int {
+        var lo = 0
+        var hi = t9Order.size
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            if (t9Sigs[t9Order[mid]] < target) lo = mid + 1 else hi = mid
+        }
+        return lo
     }
 
     fun contains(pinyin: String): Boolean {
