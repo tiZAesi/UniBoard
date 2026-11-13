@@ -347,7 +347,9 @@ class KeyboardView @JvmOverloads constructor(
         // popups 属于 KeyAction.Insert，不是 Key 自身的属性
         val popups = (key.action as? KeyAction.Insert)?.popups ?: return emptyList()
         if (popups.isEmpty()) return emptyList()
-        return listOf(key.label) + popups
+        // 九键的键面是「abc」这种字母组，弹层只列单个变体，不把整串当选项
+        val head = if (key.label.length == 1) listOf(key.label) else emptyList()
+        return head + popups
     }
 
     private fun layoutPopup(p: PressedState) {

@@ -631,6 +631,11 @@ class UniBoardImeService : InputMethodService(),
     private var lastWasSpace = false
 
     private fun handleSpace() {
+        // 明快键盘不用组合串，空格直接提交第一个候选
+        if (mkActive && currentCandidates.isNotEmpty()) {
+            commitCandidate(0)
+            return
+        }
         if (composer.isComposing) {
             if (currentCandidates.isNotEmpty()) {
                 commitCandidate(0)
