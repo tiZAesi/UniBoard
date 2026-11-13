@@ -52,7 +52,11 @@ class KeyboardPickerPanelView(context: Context) : LinearLayout(context) {
     private val options = listOf(
         Option(Prefs.KB_FULL, "全键盘", "QWERTY 全键盘，拼音与英文都能打"),
         Option(Prefs.KB_NINE, "九键（T9）", "2–9 数字键出拼音候选，单手更省力"),
-        Option(Prefs.KB_MINGKWAI, "明快键盘", "按字的上形与下形两键取字，参考明快打字机")
+        Option(Prefs.KB_MINGKWAI, "明快键盘", "上形 + 下形两键取字，参考明快打字机"),
+        Option(Prefs.KB_SHUANGPIN, "双拼（小鹤）", "每个音节两键：声母键 + 韵母键"),
+        Option(Prefs.KB_STROKE, "笔画输入", "横竖撇捺折，逐笔缩小范围，不认字也能打"),
+        Option(Prefs.KB_T9_EN, "英文九键", "数字键打英文，T9 前缀匹配"),
+        Option(Prefs.KB_KANA, "日文假名", "五十音两页，点一下就读入假名")
     )
 
     init {

@@ -19,7 +19,9 @@ import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import android.view.VelocityTracker
 import android.view.animation.DecelerateInterpolator
+import android.widget.OverScroller
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.DrawableCompat
 import org.YavSoft.UniBoard.R
@@ -95,11 +97,18 @@ class UnicodePanelView @JvmOverloads constructor(
         textAlign = Paint.Align.LEFT
         textSize = context.sp(8.5f)
     }
+    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = context.dp(1.2f)
+    }
     private val smallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.LEFT
         textSize = context.sp(12f)
     }
     private val baseTypeface: Typeface = Typeface.DEFAULT
+    private val scroller = OverScroller(context)
+    private var velocity: VelocityTracker? = null
+    private val renderCache = HashMap<Int, Boolean>(256)
     private val tmpRect = RectF()
     private val drawableCache = HashMap<Long, android.graphics.drawable.Drawable>(4)
 
@@ -144,6 +153,22 @@ class UnicodePanelView @JvmOverloads constructor(
         invalidate()
     }
 
+    /** 惯性滑动：松手后按速度继续滚一段 */
+    override fun computeScroll() {
+        if (scroller.computeScrollOffset()) {
+            scrollY = scroller.currY.toFloat()
+            invalidate()
+        }
+    }
+
+    private fun fling(velocityY: Float) {
+        val limit = (if (indexing) maxIndexScroll() else maxScroll()).toInt()
+        if (limit <= 0) return
+        scroller.forceFinished(true)
+        scroller.fling(0, scrollY.toInt(), 0, (-velocityY).toInt(), 0, 0, 0, limit)
+        invalidate()
+    }
+
     private fun maxScroll(): Float {
         if (results.isEmpty()) return 0f
         val rows = ceil(results.size / columns.toFloat()).toInt()
@@ -181,6 +206,7 @@ class UnicodePanelView @JvmOverloads constructor(
         drawHeader(canvas)
         drawStatus(canvas)
         if (indexing) drawIndex(canvas) else drawGrid(canvas)
+        drawScrollbar(canvas)
     }
 
     private fun drawHeader(canvas: Canvas) {
@@ -298,6 +324,22 @@ class UnicodePanelView @JvmOverloads constructor(
         canvas.restore()
     }
 
+    /** 右侧滚动条：一眼看出当前位置与总量 */
+    private fun drawScrollbar(canvas: Canvas) {
+        val content = if (indexing) indexRows() * indexRowHeight else {
+            if (results.isEmpty()) 0f else ceil(results.size / columns.toFloat()) * cellSize
+        }
+        val view = height - gridTop
+        if (content <= view || view <= 0) return
+        val max = content - view
+        val thumbH = (view * view / content).coerceAtLeast(context.dp(36f))
+        val top = gridTop + (scrollY / max) * (view - thumbH)
+        fillPaint.color = theme.divider
+        val w = context.dp(4f)
+        tmpRect.set(width - context.dp(6f), top, width - context.dp(2f), top + thumbH)
+        canvas.drawRoundRect(tmpRect, w / 2f, w / 2f, fillPaint)
+    }
+
     private fun drawGrid(canvas: Canvas) {
         if (results.isEmpty()) return
         val cols = columns
@@ -322,10 +364,21 @@ class UnicodePanelView @JvmOverloads constructor(
             val cp = results[i]
             val s = UnicodeRepository.charOf(cp)
             if (s.isEmpty()) continue
+            val renderable = renderCache.getOrPut(cp) { fontResolver.isRenderable(cp) }
+            if (!renderable) {
+                // 当前字体没有这个字形：画虚框占位，避免满屏豆腐块分不清哪个是哪个
+                strokePaint.color = theme.divider
+                tmpRect.set(
+                    x + cell * 0.22f, y + context.dp(6f),
+                    x + cell * 0.78f, y + cell * 0.62f
+                )
+                canvas.drawRoundRect(tmpRect, context.dp(4f), context.dp(4f), strokePaint)
+            } else {
             val w = fontResolver.measure(s, glyphPaint, baseTypeface)
             val glyphBaseline = y + cell * 0.58f - (gfm.ascent + gfm.descent) / 2f
             glyphPaint.color = theme.textPrimary
             fontResolver.draw(canvas, s, x + (cell - w) / 2f, glyphBaseline, glyphPaint, baseTypeface)
+            }
 
             // 字符下面标出码点，方便直接读编码
             val code = cp.toString(16).uppercase().padStart(4, '0')
@@ -378,6 +431,9 @@ class UnicodePanelView @JvmOverloads constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                scroller.forceFinished(true)
+                velocity?.recycle()
+                velocity = VelocityTracker.obtain().apply { addMovement(event) }
                 touchDownY = event.y
                 dragging = false
                 if (event.y < handleHeight) {
@@ -398,6 +454,7 @@ class UnicodePanelView @JvmOverloads constructor(
                     dragging = true
                     pressedCell = -1
                 }
+                velocity?.addMovement(event)
                 if (dragging) {
                     scrollY -= event.y - touchDownY
                     val limit = if (indexing) maxIndexScroll() else maxScroll()
@@ -435,9 +492,21 @@ class UnicodePanelView @JvmOverloads constructor(
                         pressedCell >= 0 -> {
                             val cp = results[pressedCell]
                             recents.add(cp)
+                            val renderable = renderCache.getOrPut(cp) { fontResolver.isRenderable(cp) }
                             listener?.onPick(UnicodeRepository.charOf(cp))
+                            if (!renderable) {
+                                android.widget.Toast.makeText(
+                                    context, "当前字体缺少该字形，已按码点插入",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         }
                     }
+                }
+                if (dragging) {
+                    velocity?.computeCurrentVelocity(1000)
+                    val vy = velocity?.yVelocity ?: 0f
+                    if (abs(vy) > context.dp(60f)) fling(-vy)
                 }
                 pressedCell = -1
                 dragging = false

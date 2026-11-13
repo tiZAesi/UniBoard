@@ -93,6 +93,9 @@ sealed interface KeyAction {
 
     /** 明快键盘：长按字根键时提示该形状包含哪些写法 */
     data class MingKwaiHint(val id: Int) : KeyAction
+
+    /** 笔画键盘：1 横 2 竖 3 撇 4 点/捺 5 折 */
+    data class Stroke(val type: Int) : KeyAction
 }
 
 /** 单个按键定义 */

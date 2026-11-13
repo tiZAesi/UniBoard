@@ -36,6 +36,8 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
     val userLexicon = UserLexicon(appContext)
     /** 明快键盘的上下形索引 */
     val mingKwai = MingKwaiLexicon()
+    /** 笔画输入索引 */
+    val strokeLexicon = StrokeLexicon()
     private val history = UserHistory(appContext)
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -62,6 +64,10 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
                         .use { zhInitials.load(it) }
                 }
                 appContext.assets.open("lexicon/en_words.txt").bufferedReader().use { en.load(it) }
+                runCatching {
+                    appContext.assets.open("lexicon/stroke_index.txt").bufferedReader()
+                        .use { strokeLexicon.load(it) }
+                }
                 runCatching {
                     appContext.assets.open("lexicon/mingkwai_keys.txt").bufferedReader().use { keys ->
                         appContext.assets.open("lexicon/mingkwai_index.txt").bufferedReader().use { idx ->
@@ -362,6 +368,13 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
                 }
             }
         }
+    }
+
+    /** 英文九键：数字串 → 英文词 */
+    fun predictT9English(digits: String, limit: Int = 24): PredictionResult {
+        if (!ready || digits.isEmpty()) return PredictionResult.EMPTY
+        val words = en.t9Prefix(digits, limit)
+        return PredictionResult(words.map { Candidate(text = it.text, score = it.freq.toDouble()) })
     }
 
     /** 滑行输入解码：把经过的按键字母交给 [GestureDecoder] */

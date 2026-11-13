@@ -35,6 +35,9 @@ object Layouts {
     const val PC = "pc"
     const val NINE = "nine"
     const val MINGKWAI = "mingkwai"
+    const val STROKE = "stroke"
+    const val KANA = "kana"
+    const val KANA2 = "kana2"
 
     /** 长按备选字符表（拉丁字母的变体与重音形式） */
     private val ACCENTS: Map<String, List<String>> = mapOf(
@@ -345,9 +348,19 @@ object Layouts {
 
         val rows = ArrayList<KeyRow>(5)
         var index = 0
+        var rowNo = 0
         while (index + 7 <= keys.size) {
-            rows.add(KeyRow(keys.subList(index, index + 7).map(::shapeKey)))
+            // 每行左右各缩一点，末行缩得多一些，视觉上接近全键盘的行错落
+            val inset = if (rowNo % 2 == 0) 0.012f else 0.028f
+            rows.add(
+                KeyRow(
+                    keys = keys.subList(index, index + 7).map(::shapeKey),
+                    leftInset = inset,
+                    rightInset = inset
+                )
+            )
             index += 7
+            rowNo++
         }
         val tail = ArrayList<Key>(7)
         while (index < keys.size) {
@@ -355,12 +368,106 @@ object Layouts {
             index++
         }
         tail.add(Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION))
-        tail.add(Key(KeyAction.Space, label = "", weight = 1.6f, style = KeyStyle.SPACE))
+        tail.add(Key(KeyAction.Space, label = "", weight = 2.4f, style = KeyStyle.SPACE))
         tail.add(icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION).copy(repeatable = true))
         tail.add(icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION))
         tail.add(Key(KeyAction.Language, label = modeLabel, weight = 1f, style = KeyStyle.FUNCTION))
         rows.add(KeyRow(tail))
         return KeyboardLayout(MINGKWAI, rows, rowCount = 4f)
+    }
+
+    /**
+     * 笔画键盘：五种基本笔画横竖撇捺折，布局沿用九键的「左侧标点 / 右侧功能键」习惯。
+     *
+     * 行数比九键少，所以 [KeyboardLayout.rowCount] 设为 3，让每行更高、更好按。
+     */
+    fun strokeKey(modeLabel: String, chinese: Boolean): KeyboardLayout {
+        fun s(type: Int, label: String, w: Float = 1.15f) =
+            Key(KeyAction.Stroke(type), label = label, weight = w, style = KeyStyle.SHAPE)
+
+        val comma = if (chinese) "，" else ","
+        val period = if (chinese) "。" else "."
+        val rows = listOf(
+            KeyRow(
+                listOf(
+                    s(1, "一"), s(2, "丨"), s(3, "丿"), s(4, "丶"), s(5, "乙")
+                )
+            ),
+            KeyRow(
+                listOf(
+                    s(0, "？", 1.0f),
+                    f(comma, KeyStyle.FUNCTION),
+                    f(period, KeyStyle.FUNCTION),
+                    icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION)
+                        .copy(repeatable = true),
+                    icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION)
+                )
+            ),
+            KeyRow(
+                listOf(
+                    Key(KeyAction.Language, label = modeLabel, weight = 1f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.Space, label = "", weight = 2.4f, style = KeyStyle.SPACE),
+                    icon(
+                        KeyAction.SendKey(android.view.KeyEvent.KEYCODE_DPAD_LEFT),
+                        R.drawable.ic_cursor_left, KeyStyle.FUNCTION
+                    ),
+                    icon(
+                        KeyAction.SendKey(android.view.KeyEvent.KEYCODE_DPAD_RIGHT),
+                        R.drawable.ic_cursor_right, KeyStyle.FUNCTION
+                    )
+                )
+            )
+        )
+        return KeyboardLayout(STROKE, rows, rowCount = 3f)
+    }
+
+    /**
+     * 日文假名键盘：五十音两页，按即上屏。
+     *
+     * 页 1 あ〜な行，页 2 は〜ら行与ん／长音符；底行放语言、翻页、空格、退格、回车。
+     */
+    fun kana(page: Int, modeLabel: String): KeyboardLayout {
+        fun k(ch: String) = Key(KeyAction.Insert(ch), label = ch, weight = 1f, style = KeyStyle.CHAR)
+
+        val table = if (page == 1) {
+            listOf(
+                listOf("あ", "い", "う", "え", "お"),
+                listOf("か", "き", "く", "け", "こ"),
+                listOf("さ", "し", "す", "せ", "そ"),
+                listOf("た", "ち", "つ", "て", "と"),
+                listOf("な", "に", "ぬ", "ね", "の")
+            )
+        } else {
+            listOf(
+                listOf("は", "ひ", "ふ", "へ", "ほ"),
+                listOf("ま", "み", "む", "め", "も"),
+                listOf("や", "ゆ", "よ", "わ", "を"),
+                listOf("ら", "り", "る", "れ", "ろ"),
+                listOf("ん", "ー", "゛", "゜", "、")
+            )
+        }
+
+        val rows = ArrayList<KeyRow>(6)
+        for (line in table) rows.add(KeyRow(line.map(::k)))
+        rows.add(
+            KeyRow(
+                listOf(
+                    Key(KeyAction.Language, label = modeLabel, weight = 1f, style = KeyStyle.FUNCTION),
+                    Key(
+                        if (page == 1) KeyAction.Goto(KANA2) else KeyAction.Goto(KANA),
+                        label = if (page == 1) "次頁" else "前頁",
+                        weight = 1f,
+                        style = KeyStyle.FUNCTION
+                    ),
+                    Key(KeyAction.Space, label = "", weight = 2.2f, style = KeyStyle.SPACE),
+                    icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION)
+                        .copy(repeatable = true),
+                    icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION)
+                )
+            )
+        )
+        return KeyboardLayout(if (page == 1) KANA else KANA2, rows, rowCount = 5f)
     }
 
     /**
