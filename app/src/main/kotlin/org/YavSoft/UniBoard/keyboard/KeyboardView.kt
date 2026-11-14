@@ -361,7 +361,7 @@ class KeyboardView @JvmOverloads constructor(
         // 九键的键面是「abc」这种字母组，弹层只列单个变体，不把整串当选项
         val head = if (key.label.length == 1) listOf(key.label) else emptyList()
         val extra = key.upSwipe?.takeIf { it.isNotEmpty() && it !in popups }?.let { listOf(it) } ?: emptyList()
-        return head + popups + extra
+        return head + popups + key.variants + extra
     }
 
     private fun layoutPopup(p: PressedState) {

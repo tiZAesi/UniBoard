@@ -218,9 +218,55 @@ class UniBoardImeService : InputMethodService(),
         updateCandidates()
     }
 
+    /**
+     * 物理键盘（外接蓝牙/USB 键盘）：像桌面输入法一样直接吃按键。
+     *
+     * 字母、数字、空格走和屏幕键盘同一条路径（拼音/九键/注音/日文都能用），
+     * 标点直接上屏；Ctrl/Alt/Meta 组合交回系统，保留 Ctrl+C/V、Ctrl+A 等。
+     */
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK && closeTopPanel()) return true
+        if (event == null) return super.onKeyDown(keyCode, event)
+        if (event.isCtrlPressed || event.isAltPressed || event.isMetaPressed) {
+            return super.onKeyDown(keyCode, event)
+        }
+        when (keyCode) {
+            KeyEvent.KEYCODE_DEL -> {
+                handleBackspace()
+                return true
+            }
+            KeyEvent.KEYCODE_FORWARD_DEL -> {
+                currentInputConnection?.deleteSurroundingText(0, 1)
+                return true
+            }
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                handleEnter()
+                return true
+            }
+            KeyEvent.KEYCODE_SPACE -> {
+                handleSpace()
+                return true
+            }
+            KeyEvent.KEYCODE_ESCAPE -> if (closeTopPanel()) return true
+        }
+        val codePoint = event.unicodeChar
+        if (codePoint != 0) {
+            val text = String(Character.toChars(codePoint))
+            handleHardwareText(text)
+            return true
+        }
         return super.onKeyDown(keyCode, event)
+    }
+
+    /** 物理键盘的普通字符：字母数字走组合链路，其余直接上屏 */
+    private fun handleHardwareText(text: String) {
+        if (text.isEmpty()) return
+        val ch = text[0]
+        if (ch.isLetter() || ch.isDigit() || ch == ' ') {
+            handleInsert(text)
+        } else {
+            commitDirect(text)
+        }
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
@@ -342,6 +388,7 @@ class UniBoardImeService : InputMethodService(),
             layoutId == Layouts.SYMBOLS_MORE -> Layouts.symbolsMore(isChineseMode)
             layoutId == Layouts.NINE -> Layouts.nineKey(modeLabel(), isChineseMode)
             layoutId == Layouts.MINGKWAI -> mingKwaiLayout()
+            layoutId == Layouts.MINGKWAI2 -> mingKwaiLayout(page = 2)
             shiftOn -> Layouts.buildLatin(upper = true, chinese = isChineseMode, numberRow = prefs.numberRow)
             // 中文模式下按设置选键盘：全键盘 / 九键 / 明快；符号页与英文模式仍走全键盘
             mode == InputMode.PINYIN && prefs.keyboardType == 1 ->
@@ -606,6 +653,17 @@ class UniBoardImeService : InputMethodService(),
             currentCandidates = if (predictOn && lastWord != null) engine.suggestNext(lastWord!!) else emptyList()
             correctedHint = null
         }
+        // 语义 emoji：输入「笑」「heart」这类描述词时补进候选栏
+        if (composing.length >= 1) {
+            val emojis = org.YavSoft.UniBoard.emoji.EmojiKeywords.suggest(composing, 6)
+            if (emojis.isNotEmpty()) {
+                val merged = LinkedHashMap<String, Candidate>()
+                currentCandidates.forEach { merged[it.text] = it }
+                emojis.forEach { merged.putIfAbsent(it, Candidate(text = it, hint = "emoji")) }
+                currentCandidates = merged.values.toList()
+            }
+        }
+
         val bar = candidateBar ?: return
         bar.candidates = currentCandidates
         bar.statusHint = buildHint(composing)
@@ -993,10 +1051,10 @@ class UniBoardImeService : InputMethodService(),
     }
 
     /** 明快键盘布局：形状键来自词库，词库未就绪时退回全键盘 */
-    private fun mingKwaiLayout(): KeyboardLayout {
+    private fun mingKwaiLayout(page: Int = 1): KeyboardLayout {
         val lex = engine.mingKwai
         if (!lex.isLoaded) return Layouts.buildLatin(upper = false, chinese = isChineseMode, numberRow = false)
-        return Layouts.mingkwai(lex.shapeKeys, modeLabel(), isChineseMode)
+        return Layouts.mingkwai(lex.shapeKeys, modeLabel(), isChineseMode, page)
     }
 
     /** 笔画键：把笔画追加到笔画串 */

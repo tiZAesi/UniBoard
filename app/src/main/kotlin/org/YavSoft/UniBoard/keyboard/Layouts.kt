@@ -35,6 +35,7 @@ object Layouts {
     const val PC = "pc"
     const val NINE = "nine"
     const val MINGKWAI = "mingkwai"
+    const val MINGKWAI2 = "mingkwai2"
     const val STROKE = "stroke"
     const val KANA = "kana"
     const val ZHUYIN = "zhuyin"
@@ -219,8 +220,14 @@ object Layouts {
                     Key(KeyAction.Insert("'", listOf("‘", "’", "「", "」")), label = "'"),
                     Key(KeyAction.Insert(":", listOf("：", "；", "∶")), label = ":"),
                     Key(KeyAction.Insert(";", listOf("；", "：", "﹔")), label = ";"),
-                    Key(KeyAction.Insert("!", listOf("！", "？", "‼")), label = "!"),
-                    Key(KeyAction.Insert("?", listOf("？", "！", "⁇")), label = "?"),
+                    Key(
+                        KeyAction.Insert("!", listOf("！", "¡", "‼", "❗", "😮")),
+                        label = "!"
+                    ),
+                    Key(
+                        KeyAction.Insert("?", listOf("？", "¿", "⁇", "❓", "🤔", "😕")),
+                        label = "?"
+                    ),
                     icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION, 1.4f)
                         .copy(repeatable = true)
                 )
@@ -362,19 +369,24 @@ object Layouts {
     }
 
     /**
-     * 明快键盘：字根键 + 两键取字。
+     * 明快键盘：字根键 + 两键取字，全部 72 个形状键分两页。
      *
-     * 布局参考明快打字机：每行键数不同（8 / 8 / 7 / 7），行首缩进逐行错开，
-     * 键帽大小随行变化，看起来像打字机的字根盘，而不是一块规整方阵。
-     * 键面写偏旁（氵 扌 亻），角落标出该形状的正字名（水 手 人），衬线字体绘制。
+     * 原版明快打字机是 72 键的字根盘，手机上摆不下，所以：
+     * - 第一页只放最常用的 32 个（按字频排序取前 32），排成 9 列 4 行，
+     *   行首缩进错开，接近全键盘的观感；
+     * - 其余 40 个收进第二页，由「更多」键进入，第二页同样 4 行字根 + 一行功能键；
+     * - 键面写偏旁（氵 扌 亻），角落标正字名（水 手 人）；
+     * - 长按弹出该形状的「其余写法」，与符号变体同一套弹层，选中即输入该写法。
      */
     fun mingkwai(
         keys: List<org.YavSoft.UniBoard.predict.MingKwaiLexicon.Shape>,
         modeLabel: String,
-        chinese: Boolean
+        chinese: Boolean,
+        page: Int = 1
     ): KeyboardLayout {
         fun shapeKey(shape: org.YavSoft.UniBoard.predict.MingKwaiLexicon.Shape): Key {
-            val face = shape.members.firstOrNull()?.toString() ?: shape.label
+            val writeups = shape.members.map { it.toString() }
+            val face = writeups.firstOrNull() ?: shape.label
             val corner = if (face != shape.label) shape.label else null
             return Key(
                 action = KeyAction.MingKwai(shape.id),
@@ -382,29 +394,52 @@ object Layouts {
                 weight = 1f,
                 style = KeyStyle.SHAPE,
                 hint = corner,
-                longPressAction = KeyAction.MingKwaiHint(shape.id)
+                variants = writeups.drop(1)
             )
         }
 
-        val perRow = intArrayOf(8, 8, 7, 7)
-        val insets = floatArrayOf(0.008f, 0.024f, 0.012f, 0.028f)
+        if (page == 2) {
+            val rest = keys.drop(32)
+            val rows = ArrayList<KeyRow>(5)
+            var i = 0
+            repeat(4) {
+                val row = ArrayList<Key>(10)
+                while (row.size < 10 && i < rest.size) row.add(shapeKey(rest[i++]))
+                rows.add(KeyRow(row, leftInset = 0.006f, rightInset = 0.006f))
+            }
+            rows.add(
+                KeyRow(
+                    listOf(
+                        Key(KeyAction.Goto(MINGKWAI), label = "返回", weight = 1f, style = KeyStyle.FUNCTION),
+                        Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION),
+                        Key(KeyAction.Space, label = "", weight = 2.0f, style = KeyStyle.SPACE),
+                        icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION)
+                            .copy(repeatable = true),
+                        icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION)
+                    )
+                )
+            )
+            return KeyboardLayout(MINGKWAI2, rows, rowCount = 5f)
+        }
+
+        val common = keys.take(32)
+        val perRow = intArrayOf(8, 9, 9, 6)
+        val insets = floatArrayOf(0.006f, 0.018f, 0.010f, 0.022f)
         val rows = ArrayList<KeyRow>(4)
         var index = 0
         for (r in perRow.indices) {
-            val row = ArrayList<Key>(perRow[r] + 3)
+            val row = ArrayList<Key>(11)
             repeat(perRow[r]) {
-                if (index < keys.size) row.add(shapeKey(keys[index++]))
+                if (index < common.size) row.add(shapeKey(common[index++]))
             }
-            if (r == 2) {
-                row.add(Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION))
-            }
-            if (r == 3) {
-                row.add(Key(KeyAction.Space, label = "", weight = 1.8f, style = KeyStyle.SPACE))
-                row.add(
-                    icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION)
-                        .copy(repeatable = true)
-                )
-                row.add(icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION, 1.2f))
+            when (r) {
+                0 -> row.add(icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION).copy(repeatable = true))
+                2 -> row.add(Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION))
+                3 -> {
+                    row.add(Key(KeyAction.Goto(MINGKWAI2), label = "更多", weight = 1f, style = KeyStyle.FUNCTION))
+                    row.add(Key(KeyAction.Space, label = "", weight = 1.8f, style = KeyStyle.SPACE))
+                    row.add(icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION, 1.2f))
+                }
             }
             rows.add(KeyRow(row, leftInset = insets[r], rightInset = insets[r]))
         }

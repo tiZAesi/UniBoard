@@ -120,7 +120,9 @@ data class Key(
      */
     val longPressAction: KeyAction? = null,
     /** 上滑直接输入的字符（键帽角上会标出来） */
-    val upSwipe: String? = null
+    val upSwipe: String? = null,
+    /** 长按弹层里的「其余写法」，与符号变体同一套弹层 */
+    val variants: List<String> = emptyList()
 )
 
 /** 一行按键 */
