@@ -189,6 +189,15 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 | AGP | 8.5.2 |
 | Gradle | 8.7 |
 
+仓库里带了一份 GitHub Actions 工作流（自检 + 单测 + 打 APK），放在
+`tools/ci/android-workflow.yml`：因为推送令牌没有 `workflow` scope，暂时不能直接放进
+`.github/workflows/`。想启用就把它复制过去：
+
+```bash
+mkdir -p .github/workflows && cp tools/ci/android-workflow.yml .github/workflows/android.yml
+git add .github/workflows/android.yml && git commit -m "启用 CI" && git push
+```
+
 跑一遍单元测试与静态自检：
 
 ```bash
