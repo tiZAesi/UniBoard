@@ -129,6 +129,8 @@ class KeyboardView @JvmOverloads constructor(
         var glide = false
         /** 滑行经过的字母序列 */
         val letters = ArrayList<String>(8)
+        /** 是否已触发上滑输入 */
+        var upSwipeFired = false
     }
 
     private var pressed: PressedState? = null
@@ -358,7 +360,8 @@ class KeyboardView @JvmOverloads constructor(
         if (popups.isEmpty()) return emptyList()
         // 九键的键面是「abc」这种字母组，弹层只列单个变体，不把整串当选项
         val head = if (key.label.length == 1) listOf(key.label) else emptyList()
-        return head + popups
+        val extra = key.upSwipe?.takeIf { it.isNotEmpty() && it !in popups }?.let { listOf(it) } ?: emptyList()
+        return head + popups + extra
     }
 
     private fun layoutPopup(p: PressedState) {
@@ -490,6 +493,16 @@ class KeyboardView @JvmOverloads constructor(
         }
         // 滑行输入：起手在字母键上、位移超过阈值后转入轨迹收集，
         // 此后不再按「移出键帽即取消」处理，否则一笔划过必然中途被取消。
+        // 上滑输入：向上推过阈值就直接取键帽角上的字符
+        if (!p.popupShown && !p.upSwipeFired && !p.glide) {
+            val up = p.hit.key.upSwipe
+            if (!up.isNullOrEmpty() && p.downY - event.y > context.dp(16f)) {
+                p.upSwipeFired = true
+                removeCallbacks(longPressRunnable)
+                invalidate()
+                return
+            }
+        }
         if (prefs.gestureInput && !p.popupShown) {
             if (!p.glide) {
                 val moved = abs(event.x - p.downX) + abs(event.y - p.downY) > context.dp(10f)
@@ -516,6 +529,15 @@ class KeyboardView @JvmOverloads constructor(
         val p = pressed ?: return
         removeCallbacks(longPressRunnable)
         stopRepeat()
+        if (p.upSwipeFired) {
+            val up = p.hit.key.upSwipe
+            p.upSwipeFired = false
+            pressed = null
+            releasePress(p)
+            if (!up.isNullOrEmpty()) listener?.onKey(KeyAction.Insert(up))
+            performClick()
+            return
+        }
         if (p.glide) {
             // 滑行结束：把整条轨迹交给上层解码，不再触发按下键本身的动作
             val letters = p.letters.toList()

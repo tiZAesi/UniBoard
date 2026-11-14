@@ -263,7 +263,7 @@ class Prefs(context: Context) {
     /** 中文模式的键盘类型：0=全键盘 1=九键（T9） 2=明快（上下形取字） */
     var keyboardType: Int
         get() = readInt(K_KEYBOARD_TYPE, 0)
-        set(v) = sp.edit().putInt(K_KEYBOARD_TYPE, v.coerceIn(0, 6)).apply()
+        set(v) = sp.edit().putInt(K_KEYBOARD_TYPE, v.coerceIn(0, 7)).apply()
 
     /** 兼容旧开关：勾上即键盘类型切到九键 */
     var nineKeyPinyin: Boolean
@@ -276,6 +276,11 @@ class Prefs(context: Context) {
     var mixedEnglish: Boolean
         get() = readBool(K_MIXED_EN, true)
         set(v) = sp.edit().putBoolean(K_MIXED_EN, v).apply()
+
+    /** 注音输入输出繁体 */
+    var zhuyinTraditional: Boolean
+        get() = readBool("zhuyin_traditional", false)
+        set(v) = sp.edit().putBoolean("zhuyin_traditional", v).apply()
 
     /** 滑行输入：在字母键上一笔划过若干键直接出词 */
     var gestureInput: Boolean
@@ -480,6 +485,7 @@ class Prefs(context: Context) {
         const val KB_STROKE = 4
         const val KB_T9_EN = 5
         const val KB_KANA = 6
+        const val KB_ZHUYIN = 7
 
         const val MODE_UNICODE = 0
         const val MODE_PINYIN = 1

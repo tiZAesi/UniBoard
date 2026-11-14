@@ -96,6 +96,9 @@ sealed interface KeyAction {
 
     /** 笔画键盘：1 横 2 竖 3 撇 4 点/捺 5 折 */
     data class Stroke(val type: Int) : KeyAction
+
+    /** 注音键盘：简繁输出切换 */
+    data object ToggleTraditional : KeyAction
 }
 
 /** 单个按键定义 */
@@ -115,7 +118,9 @@ data class Key(
      * 长按触发的动作（可选）。
      * 用于「单击插入文本、长按打开面板」这类双行为键，例如 Unicode 盘上的 U+ / 0x。
      */
-    val longPressAction: KeyAction? = null
+    val longPressAction: KeyAction? = null,
+    /** 上滑直接输入的字符（键帽角上会标出来） */
+    val upSwipe: String? = null
 )
 
 /** 一行按键 */

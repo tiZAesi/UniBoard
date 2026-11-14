@@ -86,6 +86,14 @@ class UniBoardImeService : InputMethodService(),
     private val shuangpinActive: Boolean
         get() = mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_SHUANGPIN
 
+    /** 注音：注音符号键盘 */
+    private val zhuyinActive: Boolean
+        get() = mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_ZHUYIN
+
+    /** 日文：全键盘 + 罗马字转假名 */
+    private val kanaActive: Boolean
+        get() = mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_KANA
+
     /** 九键内部编码：数字串只在内部使用，界面上显示拼音 */
     private var t9Digits: String = ""
 
@@ -340,15 +348,22 @@ class UniBoardImeService : InputMethodService(),
                 Layouts.nineKey(modeLabel(), isChineseMode)
             mode == InputMode.PINYIN && prefs.keyboardType == 2 && engine.mingKwai.isLoaded ->
                 mingKwaiLayout()
-            // 双拼：沿用全键盘，只是把输入按双拼解码
+            // 双拼：沿用全键盘，键角标换韵母提示
             mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_SHUANGPIN ->
-                Layouts.buildLatin(upper = false, chinese = isChineseMode, numberRow = prefs.numberRow)
+                Layouts.buildLatin(
+                    upper = false, chinese = isChineseMode,
+                    numberRow = prefs.numberRow, finalHints = true
+                )
             mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_STROKE ->
                 Layouts.strokeKey(modeLabel(), isChineseMode)
             mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_T9_EN ->
                 Layouts.nineKey(modeLabel(), isChineseMode)
+            // 日文：全键盘布局，输入罗马字转假名
             mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_KANA ->
-                Layouts.kana(1, modeLabel())
+                Layouts.buildLatin(upper = false, chinese = false, numberRow = false)
+            mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_ZHUYIN ->
+                Layouts.zhuyin(modeLabel(), prefs.zhuyinTraditional)
+            layoutId == Layouts.ZHUYIN -> Layouts.zhuyin(modeLabel(), prefs.zhuyinTraditional)
             layoutId == Layouts.STROKE -> Layouts.strokeKey(modeLabel(), isChineseMode)
             layoutId == Layouts.KANA -> Layouts.kana(1, modeLabel())
             layoutId == Layouts.KANA2 -> Layouts.kana(2, modeLabel())
@@ -497,6 +512,43 @@ class UniBoardImeService : InputMethodService(),
             val bar = candidateBar ?: return
             bar.candidates = currentCandidates
             bar.statusHint = t9eDigits
+            bar.toolsVisible = currentCandidates.isEmpty()
+            showCandidateBar()
+            return
+        }
+
+        // 日文：罗马字 → 假名，候选给平假名与片假名
+        if (kanaActive && composing.isNotEmpty()) {
+            val hira = org.YavSoft.UniBoard.predict.RomajiKana.toHiragana(composing)
+            val kata = org.YavSoft.UniBoard.predict.RomajiKana.toKatakana(hira)
+            val list = ArrayList<Candidate>(3)
+            if (hira.isNotEmpty()) list.add(Candidate(text = hira, label = hira))
+            if (kata != hira) list.add(Candidate(text = kata, label = kata))
+            currentCandidates = list
+            correctedHint = null
+            val bar = candidateBar ?: return
+            bar.candidates = list
+            bar.statusHint = if (hira.isEmpty()) composing else hira
+            bar.toolsVisible = list.isEmpty()
+            showCandidateBar()
+            return
+        }
+
+        // 注音：符号 → 全拼 → 拼音引擎；繁体时把候选转成繁体
+        if (zhuyinActive && composing.isNotEmpty()) {
+            val py = org.YavSoft.UniBoard.predict.Zhuyin.toPinyin(composing)
+            val res = engine.predict(py, InputMode.PINYIN, prefs.candidateCount)
+            val traditional = prefs.zhuyinTraditional
+            currentCandidates = res.candidates.map { c ->
+                if (traditional) c.copy(
+                    text = org.YavSoft.UniBoard.predict.Zhuyin.toTraditional(c.text),
+                    label = org.YavSoft.UniBoard.predict.Zhuyin.toTraditional(c.label)
+                ) else c
+            }
+            correctedHint = null
+            val bar = candidateBar ?: return
+            bar.candidates = currentCandidates
+            bar.statusHint = if (py.isEmpty()) composing else py
             bar.toolsVisible = currentCandidates.isEmpty()
             showCandidateBar()
             return
@@ -679,6 +731,12 @@ class UniBoardImeService : InputMethodService(),
                 )
             }
             KeyAction.RepeatLast -> repeatLastInput()
+            KeyAction.ToggleTraditional -> {
+                prefs.zhuyinTraditional = !prefs.zhuyinTraditional
+                refreshLayout()
+                updateCandidates()
+                toast(if (prefs.zhuyinTraditional) "注音输出：繁体" else "注音输出：简体")
+            }
             KeyAction.CycleKeyboard -> openKeyboardPicker()
         }
     }
@@ -706,6 +764,13 @@ class UniBoardImeService : InputMethodService(),
             commitDirect(text)
             return
         }
+        // 注音：符号进入组合串，由 Zhuyin 折成全拼
+        if (zhuyinActive && text.length == 1 && org.YavSoft.UniBoard.predict.Zhuyin.isSymbol(text[0])) {
+            composer.append(text)
+            updateCandidates()
+            return
+        }
+
         // 九键：数字键只是编码，界面显示折算出来的拼音
         if (nineActive && text.length == 1 && text[0] in '1'..'9') {
             if (prefs.keyboardType == Prefs.KB_T9_EN) t9eDigits += text else t9Digits += text
@@ -1042,6 +1107,11 @@ class UniBoardImeService : InputMethodService(),
             when (type) {
                 Prefs.KB_NINE -> "已切换到九键（T9）键盘"
                 Prefs.KB_MINGKWAI -> "已切换到明快键盘"
+                Prefs.KB_SHUANGPIN -> "已切换到双拼（小鹤）"
+                Prefs.KB_STROKE -> "已切换到笔画输入"
+                Prefs.KB_ZHUYIN -> "已切换到注音输入"
+                Prefs.KB_T9_EN -> "已切换到英文九键"
+                Prefs.KB_KANA -> "已切换到日文（罗马字）"
                 else -> "已切换到全键盘"
             }
         )

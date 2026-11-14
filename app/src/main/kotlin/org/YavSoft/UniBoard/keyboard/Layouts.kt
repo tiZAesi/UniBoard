@@ -37,6 +37,7 @@ object Layouts {
     const val MINGKWAI = "mingkwai"
     const val STROKE = "stroke"
     const val KANA = "kana"
+    const val ZHUYIN = "zhuyin"
     const val KANA2 = "kana2"
 
     /** 长按备选字符表（拉丁字母的变体与重音形式） */
@@ -72,8 +73,22 @@ object Layouts {
     private fun icon(action: KeyAction, res: Int, style: KeyStyle = KeyStyle.FUNCTION, weight: Float = 1f): Key =
         Key(action = action, iconRes = res, weight = weight, style = style)
 
-    /** 主字母布局 */
-    fun buildLatin(upper: Boolean, chinese: Boolean, numberRow: Boolean): KeyboardLayout {
+    /** 顶行字母的上滑数字与符号：q→1! w→2@ … */
+    private val TOP_DIGITS = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
+    private val TOP_SYMBOLS = listOf("!", "@", "#", "$", "%", "^", "&", "*", "(", ")")
+    private val MID_SYMBOLS = listOf("-", "_", "=", "+", "(", ")", "[", "]", ":")
+
+    /**
+     * 主字母布局。
+     *
+     * @param finalHints 双拼：键帽角落改成该键当韵母时的提示
+     */
+    fun buildLatin(
+        upper: Boolean,
+        chinese: Boolean,
+        numberRow: Boolean,
+        finalHints: Boolean = false
+    ): KeyboardLayout {
         val rows = mutableListOf<KeyRow>()
 
         if (numberRow) {
@@ -87,9 +102,29 @@ object Layouts {
 
         val letter: (String) -> String = { if (upper) it.uppercase() else it }
 
-        rows += KeyRow(listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p").map { c(letter(it)) })
+        // 顶行：角标是数字，上滑出符号；双拼模式下角标换成韵母提示
         rows += KeyRow(
-            keys = listOf("a", "s", "d", "f", "g", "h", "j", "k", "l").map { c(letter(it)) },
+            listOf("q", "w", "e", "r", "t", "y", "u", "i", "o", "p").mapIndexed { i, ch ->
+                val key = c(letter(ch))
+                if (finalHints) {
+                    val hint = org.YavSoft.UniBoard.predict.Shuangpin.finalHint(ch[0])
+                    if (hint.isEmpty()) key else key.copy(hint = hint, upSwipe = TOP_SYMBOLS[i])
+                } else {
+                    key.copy(hint = TOP_DIGITS[i], upSwipe = TOP_SYMBOLS[i])
+                }
+            }
+        )
+        // 中行：角标是常见符号，上滑直接输入
+        rows += KeyRow(
+            keys = listOf("a", "s", "d", "f", "g", "h", "j", "k", "l").mapIndexed { i, ch ->
+                val key = c(letter(ch))
+                if (finalHints) {
+                    val hint = org.YavSoft.UniBoard.predict.Shuangpin.finalHint(ch[0])
+                    if (hint.isEmpty()) key else key.copy(hint = hint, upSwipe = MID_SYMBOLS[i])
+                } else {
+                    key.copy(hint = MID_SYMBOLS[i], upSwipe = MID_SYMBOLS[i])
+                }
+            },
             leftInset = 0.03f,
             rightInset = 0.03f
         )
@@ -179,7 +214,13 @@ object Layouts {
             KeyRow(listOf("@", "#", "$", "_", "&", "-", "+", "(", ")", "/").map { f(it) }),
             KeyRow(
                 listOf(
-                    f("*"), f("\""), f("'"), f(":"), f(";"), f("!"), f("?"),
+                    Key(KeyAction.Insert("*", listOf("＊", "×", "·")), label = "*"),
+                    Key(KeyAction.Insert("\"", listOf("“", "”", "「", "」")), label = "\""),
+                    Key(KeyAction.Insert("'", listOf("‘", "’", "「", "」")), label = "'"),
+                    Key(KeyAction.Insert(":", listOf("：", "；", "∶")), label = ":"),
+                    Key(KeyAction.Insert(";", listOf("；", "：", "﹔")), label = ";"),
+                    Key(KeyAction.Insert("!", listOf("！", "？", "‼")), label = "!"),
+                    Key(KeyAction.Insert("?", listOf("？", "！", "⁇")), label = "?"),
                     icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION, 1.4f)
                         .copy(repeatable = true)
                 )
@@ -323,12 +364,9 @@ object Layouts {
     /**
      * 明快键盘：字根键 + 两键取字。
      *
-     * 排版对齐常见手机键盘：一行 7 键、共 5 行（前 4 行 28 个形状键，
-     * 末行放剩下两个形状键与符号 / 空格 / 退格 / 回车 / 语言），
-     * `rowCount = 4` 让总高与其他布局一致，切换键盘时高度不跳。
-     *
-     * 键面用偏旁写法（氵、扌、亻…）并走衬线字体，与正文里的同形汉字区分开；
-     * 长按给出该形状包含的写法。
+     * 布局参考明快打字机：每行键数不同（8 / 8 / 7 / 7），行首缩进逐行错开，
+     * 键帽大小随行变化，看起来像打字机的字根盘，而不是一块规整方阵。
+     * 键面写偏旁（氵 扌 亻），角落标出该形状的正字名（水 手 人），衬线字体绘制。
      */
     fun mingkwai(
         keys: List<org.YavSoft.UniBoard.predict.MingKwaiLexicon.Shape>,
@@ -337,49 +375,44 @@ object Layouts {
     ): KeyboardLayout {
         fun shapeKey(shape: org.YavSoft.UniBoard.predict.MingKwaiLexicon.Shape): Key {
             val face = shape.members.firstOrNull()?.toString() ?: shape.label
+            val corner = if (face != shape.label) shape.label else null
             return Key(
                 action = KeyAction.MingKwai(shape.id),
                 label = face,
                 weight = 1f,
                 style = KeyStyle.SHAPE,
+                hint = corner,
                 longPressAction = KeyAction.MingKwaiHint(shape.id)
             )
         }
 
-        val rows = ArrayList<KeyRow>(5)
+        val perRow = intArrayOf(8, 8, 7, 7)
+        val insets = floatArrayOf(0.008f, 0.024f, 0.012f, 0.028f)
+        val rows = ArrayList<KeyRow>(4)
         var index = 0
-        var rowNo = 0
-        while (index + 7 <= keys.size) {
-            // 每行左右各缩一点，末行缩得多一些，视觉上接近全键盘的行错落
-            val inset = if (rowNo % 2 == 0) 0.012f else 0.028f
-            rows.add(
-                KeyRow(
-                    keys = keys.subList(index, index + 7).map(::shapeKey),
-                    leftInset = inset,
-                    rightInset = inset
+        for (r in perRow.indices) {
+            val row = ArrayList<Key>(perRow[r] + 3)
+            repeat(perRow[r]) {
+                if (index < keys.size) row.add(shapeKey(keys[index++]))
+            }
+            if (r == 2) {
+                row.add(Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION))
+            }
+            if (r == 3) {
+                row.add(Key(KeyAction.Space, label = "", weight = 1.8f, style = KeyStyle.SPACE))
+                row.add(
+                    icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION)
+                        .copy(repeatable = true)
                 )
-            )
-            index += 7
-            rowNo++
+                row.add(icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION, 1.2f))
+            }
+            rows.add(KeyRow(row, leftInset = insets[r], rightInset = insets[r]))
         }
-        val tail = ArrayList<Key>(7)
-        while (index < keys.size) {
-            tail.add(shapeKey(keys[index]))
-            index++
-        }
-        tail.add(Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION))
-        tail.add(Key(KeyAction.Space, label = "", weight = 2.4f, style = KeyStyle.SPACE))
-        tail.add(icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION).copy(repeatable = true))
-        tail.add(icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION))
-        tail.add(Key(KeyAction.Language, label = modeLabel, weight = 1f, style = KeyStyle.FUNCTION))
-        rows.add(KeyRow(tail))
         return KeyboardLayout(MINGKWAI, rows, rowCount = 4f)
     }
 
     /**
-     * 笔画键盘：五种基本笔画横竖撇捺折，布局沿用九键的「左侧标点 / 右侧功能键」习惯。
-     *
-     * 行数比九键少，所以 [KeyboardLayout.rowCount] 设为 3，让每行更高、更好按。
+     * 笔画键盘：五种基本笔画横竖撇捺折 + 通配「？」，布局与九键同构，共四行。
      */
     fun strokeKey(modeLabel: String, chinese: Boolean): KeyboardLayout {
         fun s(type: Int, label: String, w: Float = 1.15f) =
@@ -388,11 +421,7 @@ object Layouts {
         val comma = if (chinese) "，" else ","
         val period = if (chinese) "。" else "."
         val rows = listOf(
-            KeyRow(
-                listOf(
-                    s(1, "一"), s(2, "丨"), s(3, "丿"), s(4, "丶"), s(5, "乙")
-                )
-            ),
+            KeyRow(listOf(s(1, "一"), s(2, "丨"), s(3, "丿"), s(4, "丶"), s(5, "乙"))),
             KeyRow(
                 listOf(
                     s(0, "？", 1.0f),
@@ -405,21 +434,28 @@ object Layouts {
             ),
             KeyRow(
                 listOf(
-                    Key(KeyAction.Language, label = modeLabel, weight = 1f, style = KeyStyle.FUNCTION),
-                    Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION),
-                    Key(KeyAction.Space, label = "", weight = 2.4f, style = KeyStyle.SPACE),
                     icon(
                         KeyAction.SendKey(android.view.KeyEvent.KEYCODE_DPAD_LEFT),
                         R.drawable.ic_cursor_left, KeyStyle.FUNCTION
                     ),
+                    Key(KeyAction.Space, label = "", weight = 2.2f, style = KeyStyle.SPACE),
                     icon(
                         KeyAction.SendKey(android.view.KeyEvent.KEYCODE_DPAD_RIGHT),
                         R.drawable.ic_cursor_right, KeyStyle.FUNCTION
-                    )
+                    ),
+                    icon(KeyAction.RepeatLast, R.drawable.ic_repeat, KeyStyle.FUNCTION)
+                )
+            ),
+            KeyRow(
+                listOf(
+                    Key(KeyAction.Language, label = modeLabel, weight = 1f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.CycleKeyboard, label = "键盘", weight = 1f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.Goto(LATIN), label = "全键", weight = 1f, style = KeyStyle.FUNCTION)
                 )
             )
         )
-        return KeyboardLayout(STROKE, rows, rowCount = 3f)
+        return KeyboardLayout(STROKE, rows, rowCount = 4f)
     }
 
     /**
@@ -468,6 +504,32 @@ object Layouts {
             )
         )
         return KeyboardLayout(if (page == 1) KANA else KANA2, rows, rowCount = 5f)
+    }
+
+    /**
+     * 注音（ㄅㄆㄇㄈ）键盘：37 个注音符号 + 四个声调，五行排布。
+     */
+    fun zhuyin(modeLabel: String, traditional: Boolean): KeyboardLayout {
+        fun z(ch: String) = Key(KeyAction.Insert(ch), label = ch, weight = 1f, style = KeyStyle.CHAR)
+
+        val rows = listOf(
+            KeyRow(listOf("ㄅ", "ㄆ", "ㄇ", "ㄈ", "ㄉ", "ㄊ", "ㄋ", "ㄌ", "ㄍ", "ㄎ").map(::z)),
+            KeyRow(listOf("ㄏ", "ㄐ", "ㄑ", "ㄒ", "ㄓ", "ㄔ", "ㄕ", "ㄖ", "ㄗ", "ㄘ").map(::z)),
+            KeyRow(listOf("ㄙ", "ㄧ", "ㄨ", "ㄩ", "ㄚ", "ㄛ", "ㄜ", "ㄝ", "ㄞ", "ㄟ").map(::z)),
+            KeyRow(listOf("ㄠ", "ㄡ", "ㄢ", "ㄣ", "ㄤ", "ㄥ", "ㄦ", "ˊ", "ˇ", "ˋ").map(::z)),
+            KeyRow(
+                listOf(
+                    Key(KeyAction.Language, label = modeLabel, weight = 1f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.ToggleTraditional, label = if (traditional) "繁" else "简",
+                        weight = 1f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.Space, label = "", weight = 2.2f, style = KeyStyle.SPACE),
+                    icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION)
+                        .copy(repeatable = true),
+                    icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION)
+                )
+            )
+        )
+        return KeyboardLayout(ZHUYIN, rows, rowCount = 5f)
     }
 
     /**
