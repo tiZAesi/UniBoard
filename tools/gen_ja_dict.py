@@ -39,7 +39,7 @@ import urllib.parse
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT_PATH = os.path.join(ROOT, "app", "src", "main", "assets", "lexicon", "ja_kanji.txt.gz")
+OUT_PATH = os.path.join(ROOT, "app", "src", "main", "assets", "lexicon", "ja_kanji.lex")
 
 CACHE_DIR = os.environ.get("JA_BUILD_CACHE", "/tmp/ja_build")
 # 固定发布版本，保证可重复构建

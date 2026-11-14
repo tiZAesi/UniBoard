@@ -65,10 +65,7 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
                 }
                 appContext.assets.open("lexicon/en_words.txt").bufferedReader().use { en.load(it) }
                 runCatching {
-                    // 日文词表比较大，用 gzip 存，解压后按行读
-                    java.util.zip.GZIPInputStream(
-                        appContext.assets.open("lexicon/ja_kanji.txt.gz")
-                    ).bufferedReader().use { kanaKanji.load(it) }
+                    openJapaneseDictionary()?.use { kanaKanji.load(it.reader().buffered()) }
                 }
                 runCatching {
                     appContext.assets.open("lexicon/mingkwai_keys.txt").bufferedReader().use { keys ->
@@ -84,6 +81,26 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
             ready = zh.isLoaded || en.isLoaded
             mainHandler.post { onReady() }
         }
+    }
+
+    /**
+     * 打开日文词表。
+     *
+     * 文件在仓库里是 gzip 压缩的 `ja_kanji.lex`（扩展名不用 .gz：aapt2 会把 .gz 资源
+     * 自动解压并把名字截成 .txt，运行时按 .gz 去开就直接找不到文件）。
+     * 这里按魔数判断是否真的压缩过，两种形态都能读，将来换存储方式不会失效。
+     */
+    private fun openJapaneseDictionary(): java.io.InputStream? {
+        val stream = runCatching { appContext.assets.open("lexicon/ja_kanji.lex") }
+            .recoverCatching { appContext.assets.open("lexicon/ja_kanji.txt") }
+            .getOrNull() ?: return null
+        val buffered = java.io.BufferedInputStream(stream)
+        buffered.mark(2)
+        val b0 = buffered.read()
+        val b1 = buffered.read()
+        buffered.reset()
+        val gzip = b0 == 0x1f && b1 == 0x8b
+        return if (gzip) java.util.zip.GZIPInputStream(buffered) else buffered
     }
 
     /** 输入过程中的预测 */

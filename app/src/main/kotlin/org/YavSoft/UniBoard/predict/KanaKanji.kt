@@ -16,7 +16,7 @@ import java.io.BufferedReader
 /**
  * 假名 → 汉字 转换（日文输入法的「変換」步骤）。
  *
- * 词表来自 `assets/lexicon/ja_kanji.txt.gz`，由 `tools/gen_ja_dict.py` 从
+ * 词表来自 `assets/lexicon/ja_kanji.lex`（gzip 压缩的文本），由 `tools/gen_ja_dict.py` 从
  * JMdict（精简常用词）与 KANJIDIC2 生成，格式一行一条：
  *
  * ```

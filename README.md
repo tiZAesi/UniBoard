@@ -208,7 +208,7 @@ python3 tools/check_code.py
 | `tools/gen_lexicon.py` | `zh_pinyin.txt`、`zh_initials.txt`、`en_words.txt` | jieba 词典、google-10000-english（+ pypinyin） |
 | `tools/gen_mingkwai.py` | `mingkwai_keys.txt`、`mingkwai_index.txt` | 明快打字机字根表 |
 | `tools/gen_shuangpin.py` | `predict/ShuangpinTables.kt` | Rime 各方案的拼写代数（rime-double-pinyin） |
-| `tools/gen_ja_dict.py` | `ja_kanji.txt.gz` | JMdict（常用词 + 全量补覆盖）、KANJIDIC2 |
+| `tools/gen_ja_dict.py` | `ja_kanji.lex` | JMdict（常用词 + 全量补覆盖）、KANJIDIC2 |
 
 ```bash
 python3 tools/gen_shuangpin.py     # 双拼码表（纯计算，无需下载）
@@ -351,7 +351,7 @@ the Free Software Foundation, either version 3 of the License, or
 | [JMdict](https://www.edrdg.org/jmdict/j_jmdict.html) | 日文读音 → 表记 | CC BY-SA 4.0 |
 | [KANJIDIC2](https://www.edrdg.org/wiki/index.php/KANJIDIC_Project) | 日文单字读音与字频 | CC BY-SA 4.0 |
 
-日文词表（`assets/lexicon/ja_kanji.txt.gz`）是上述 JMdict / KANJIDIC2 的**衍生数据**，
+日文词表（`assets/lexicon/ja_kanji.lex`）是上述 JMdict / KANJIDIC2 的**衍生数据**，
 同样以 CC BY-SA 4.0 提供，可由 `tools/gen_ja_dict.py` 完整重建。
 
 应用图标由本项目自行设计，不含任何第三方商标元素。
