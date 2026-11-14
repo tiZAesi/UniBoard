@@ -39,6 +39,9 @@ object SettingsIndex {
     private fun privacy(label: String, kw: String = "") =
         Item(label, SettingsActivity.SECTION_PRIVACY, kw)
 
+    private fun data(label: String, kw: String = "") =
+        Item(label, SettingsActivity.SECTION_DATA, kw)
+
     val ITEMS: List<Item> = listOf(
         // 外观与主题
         appearance("跟随系统取色", "动态取色 material you 壁纸 主题色"),
@@ -142,6 +145,10 @@ object SettingsIndex {
         privacy("隐私模式下允许本地模型", "隐私 本地 ollama 局域网"),
         privacy("剪贴板自动清理", "隐私 清理 分钟 purge"),
         privacy("密码框保护", "安全 密码 secure"),
+        data("学习记录", "学习 记录 词频 数据 history"),
+        data("数据文件", "文件 目录 导出 备份 data files"),
+        data("导出数据副本到外部目录", "导出 备份 文件 管理器 export"),
+        data("外接键盘固定英文直出", "物理键盘 蓝牙 usb hardware"),
         privacy("清除学习记录", "学习 清除 重置"),
         privacy("清空剪贴板历史", "剪贴板 历史 清空")
     )

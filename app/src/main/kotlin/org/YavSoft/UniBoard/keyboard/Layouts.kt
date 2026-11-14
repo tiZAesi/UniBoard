@@ -369,14 +369,12 @@ object Layouts {
     }
 
     /**
-     * 明快键盘：字根键 + 两键取字，全部 72 个形状键分两页。
+     * 明快键盘：字根键 + 两键取字，72 个形状键分两页，**两页结构完全一致**。
      *
-     * 原版明快打字机是 72 键的字根盘，手机上摆不下，所以：
-     * - 第一页只放最常用的 32 个（按字频排序取前 32），排成 9 列 4 行，
-     *   行首缩进错开，接近全键盘的观感；
-     * - 其余 40 个收进第二页，由「更多」键进入，第二页同样 4 行字根 + 一行功能键；
-     * - 键面写偏旁（氵 扌 亻），角落标正字名（水 手 人）；
-     * - 长按弹出该形状的「其余写法」，与符号变体同一套弹层，选中即输入该写法。
+     * 每页都是 5 行 × 9 列：前 4 行各 9 个字根（36 个），末行是统一的 9 格功能行
+     * （翻页 / 符号 / 空格 / 退格 / 回车 / 语言 / 重输 / 键盘）。
+     * 键面写偏旁（氵 扌 亻），角落标正字名（水 手 人）；
+     * 长按弹出该形状的「其余写法」，与符号变体同一套弹层，滑到哪个松手就输入哪个。
      */
     fun mingkwai(
         keys: List<org.YavSoft.UniBoard.predict.MingKwaiLexicon.Shape>,
@@ -398,52 +396,74 @@ object Layouts {
             )
         }
 
-        if (page == 2) {
-            val rest = keys.drop(32)
-            val rows = ArrayList<KeyRow>(5)
-            var i = 0
-            repeat(4) {
-                val row = ArrayList<Key>(10)
-                while (row.size < 10 && i < rest.size) row.add(shapeKey(rest[i++]))
-                rows.add(KeyRow(row, leftInset = 0.006f, rightInset = 0.006f))
-            }
-            rows.add(
-                KeyRow(
-                    listOf(
-                        Key(KeyAction.Goto(MINGKWAI), label = "返回", weight = 1f, style = KeyStyle.FUNCTION),
-                        Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION),
-                        Key(KeyAction.Space, label = "", weight = 2.0f, style = KeyStyle.SPACE),
-                        icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION)
-                            .copy(repeatable = true),
-                        icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION)
-                    )
+        val perPage = 36
+        val pageKeys = keys.drop((page - 1) * perPage).take(perPage)
+        val rows = ArrayList<KeyRow>(5)
+        var index = 0
+        repeat(4) {
+            val row = ArrayList<Key>(9)
+            while (row.size < 9 && index < pageKeys.size) row.add(shapeKey(pageKeys[index++]))
+            rows.add(KeyRow(row, leftInset = 0.004f, rightInset = 0.004f))
+        }
+        rows.add(
+            KeyRow(
+                listOf(
+                    Key(
+                        if (page == 1) KeyAction.Goto(MINGKWAI2) else KeyAction.Goto(MINGKWAI),
+                        label = if (page == 1) "更多" else "返回",
+                        weight = 1f,
+                        style = KeyStyle.FUNCTION
+                    ),
+                    Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.Space, label = "", weight = 2f, style = KeyStyle.SPACE),
+                    icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION)
+                        .copy(repeatable = true),
+                    icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION, 1.2f),
+                    Key(KeyAction.Language, label = modeLabel, weight = 1f, style = KeyStyle.FUNCTION),
+                    icon(KeyAction.RepeatLast, R.drawable.ic_repeat, KeyStyle.FUNCTION),
+                    Key(KeyAction.CycleKeyboard, label = "键盘", weight = 1f, style = KeyStyle.FUNCTION)
                 )
             )
-            return KeyboardLayout(MINGKWAI2, rows, rowCount = 5f)
-        }
+        )
+        return KeyboardLayout(if (page == 1) MINGKWAI else MINGKWAI2, rows, rowCount = 5f)
+    }
 
-        val common = keys.take(32)
-        val perRow = intArrayOf(8, 9, 9, 6)
-        val insets = floatArrayOf(0.006f, 0.018f, 0.010f, 0.022f)
-        val rows = ArrayList<KeyRow>(4)
-        var index = 0
-        for (r in perRow.indices) {
-            val row = ArrayList<Key>(11)
-            repeat(perRow[r]) {
-                if (index < common.size) row.add(shapeKey(common[index++]))
-            }
-            when (r) {
-                0 -> row.add(icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION).copy(repeatable = true))
-                2 -> row.add(Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1f, style = KeyStyle.FUNCTION))
-                3 -> {
-                    row.add(Key(KeyAction.Goto(MINGKWAI2), label = "更多", weight = 1f, style = KeyStyle.FUNCTION))
-                    row.add(Key(KeyAction.Space, label = "", weight = 1.8f, style = KeyStyle.SPACE))
-                    row.add(icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION, 1.2f))
-                }
-            }
-            rows.add(KeyRow(row, leftInset = insets[r], rightInset = insets[r]))
-        }
-        return KeyboardLayout(MINGKWAI, rows, rowCount = 4f)
+    /**
+     * 日文（罗马字）键盘：全键盘三行字母 + 假名标点行。
+     *
+     * 底行保留「ー」「、」「。」这些日文输入必不可少的专用键。
+     */
+    fun kanaRomaji(modeLabel: String): KeyboardLayout {
+        fun c(ch: String) = Key(KeyAction.Insert(ch), label = ch, weight = 1f, style = KeyStyle.CHAR)
+
+        val rows = listOf(
+            KeyRow("qwertyuiop".map { c(it.toString()) }),
+            KeyRow(
+                keys = "asdfghjkl".map { c(it.toString()) },
+                leftInset = 0.03f,
+                rightInset = 0.03f
+            ),
+            KeyRow(
+                listOf(
+                    icon(KeyAction.Shift, R.drawable.ic_shift, KeyStyle.FUNCTION, 1.3f)
+                        .copy(longPressAction = KeyAction.ShiftLock)
+                ) + "zxcvbnm".map { c(it.toString()) } + listOf(
+                    icon(KeyAction.Backspace, R.drawable.ic_backspace, KeyStyle.FUNCTION, 1.3f)
+                        .copy(repeatable = true)
+                )
+            ),
+            KeyRow(
+                listOf(
+                    Key(KeyAction.Goto(SYMBOLS), label = "?123", weight = 1.3f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.Insert("ー"), label = "ー", weight = 1f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.Insert("、"), label = "、", weight = 1f, style = KeyStyle.FUNCTION),
+                    Key(KeyAction.Space, label = "", weight = 2.4f, style = KeyStyle.SPACE),
+                    Key(KeyAction.Insert("。"), label = "。", weight = 1f, style = KeyStyle.FUNCTION),
+                    icon(KeyAction.Enter, R.drawable.ic_enter, KeyStyle.ACTION, 1.3f)
+                )
+            )
+        )
+        return KeyboardLayout(KANA, rows, rowCount = 4f)
     }
 
     /**

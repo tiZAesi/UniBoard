@@ -355,13 +355,15 @@ class KeyboardView @JvmOverloads constructor(
     private fun emptyDrawable(): Drawable = android.graphics.drawable.ColorDrawable(0)
 
     private fun popupItems(key: Key): List<String> {
-        // popups 属于 KeyAction.Insert，不是 Key 自身的属性
-        val popups = (key.action as? KeyAction.Insert)?.popups ?: return emptyList()
-        if (popups.isEmpty()) return emptyList()
+        // 变体有两个来源：KeyAction.Insert 自带的 popups（重音、标点形态），
+        // 以及 Key.variants（明快字根的其它写法）。两者都没有时不出弹层。
+        val popups = (key.action as? KeyAction.Insert)?.popups.orEmpty()
+        val variants = key.variants
+        if (popups.isEmpty() && variants.isEmpty() && key.upSwipe.isNullOrEmpty()) return emptyList()
         // 九键的键面是「abc」这种字母组，弹层只列单个变体，不把整串当选项
         val head = if (key.label.length == 1) listOf(key.label) else emptyList()
         val extra = key.upSwipe?.takeIf { it.isNotEmpty() && it !in popups }?.let { listOf(it) } ?: emptyList()
-        return head + popups + key.variants + extra
+        return (head + popups + variants + extra).distinct()
     }
 
     private fun layoutPopup(p: PressedState) {

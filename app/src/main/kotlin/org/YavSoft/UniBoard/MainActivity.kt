@@ -208,6 +208,9 @@ class MainActivity : SettingsBase() {
         entry("输入偏好脚本", "自定义文本替换规则") {
             SettingsActivity.start(this, SettingsActivity.SECTION_SCRIPT)
         }
+        entry("学习记录与数据", "学习统计、数据文件与外接键盘") {
+            SettingsActivity.start(this, SettingsActivity.SECTION_DATA)
+        }
         entry("词典与数据", "词条生成、导入导出与清空") {
             SettingsActivity.start(this, SettingsActivity.SECTION_LEXICON)
         }

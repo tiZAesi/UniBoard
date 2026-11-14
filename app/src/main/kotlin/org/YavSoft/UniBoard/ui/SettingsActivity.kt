@@ -35,6 +35,7 @@ class SettingsActivity : SettingsBase() {
         const val SECTION_SCRIPT = "script"
         const val SECTION_LEXICON = "lexicon"
         const val SECTION_PRIVACY = "privacy"
+        const val SECTION_DATA = "data"
 
         fun start(context: Context, section: String) {
             context.startActivity(
@@ -60,6 +61,7 @@ class SettingsActivity : SettingsBase() {
             SECTION_SCRIPT -> buildScript()
             SECTION_LEXICON -> buildLexicon()
             SECTION_PRIVACY -> buildPrivacy()
+            SECTION_DATA -> buildDataInfo()
             else -> buildAppearance()
         }
     }
@@ -544,6 +546,70 @@ class SettingsActivity : SettingsBase() {
                 toast("已清空剪贴板历史")
             }
         }
+    }
+
+    /** 学习记录与数据文件 */
+    private fun buildDataInfo() {
+        title("学习记录与数据")
+        val history = org.YavSoft.UniBoard.predict.UserHistory(this).apply { load() }
+        val lex = org.YavSoft.UniBoard.predict.UserLexicon(this).apply { load() }
+        val phrases = org.YavSoft.UniBoard.clip.QuickPhrases(this)
+        val clips = org.YavSoft.UniBoard.clip.ClipStore(this)
+
+        val box = card()
+        box.addView(TextView(this).apply {
+            text = "已学习词频 ${history.size()} 条 · 用户词条 ${lex.size} 条 · " +
+                "常用语 ${phrases.list().size} 条 · 剪贴板历史 ${clips.recent().size} 条"
+            textSize = 13f
+            setTextColor(0xFF757575.toInt())
+            setPadding(dpInt(16f), dpInt(12f), dpInt(16f), dpInt(12f))
+        })
+
+        section("数据文件")
+        val files = card()
+        files.addView(TextView(this).apply {
+            text = "文件都在应用私有目录，卸载即删。点下面「导出数据副本」会把它们复制到" +
+                " Android/data/${packageName}/files/UniBoard数据，文件管理器可以看到。"
+            textSize = 12f
+            setTextColor(0xFF757575.toInt())
+            setPadding(dpInt(16f), dpInt(10f), dpInt(16f), dpInt(10f))
+        })
+        action(files, "导出数据副本到外部目录") { exportDataCopy() }
+        action(files, "打开应用信息页（查看/清除数据）") {
+            runCatching {
+                startActivity(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        android.net.Uri.parse("package:$packageName")
+                    )
+                )
+            }.onFailure { toast("无法打开应用信息页") }
+        }
+
+        section("物理键盘")
+        val kb = card()
+        toggle(kb, "外接键盘固定英文直出", "接蓝牙/USB 键盘时不进入拼音组合，直接上屏", prefs.hardwareDirectLatin) {
+            prefs.hardwareDirectLatin = it
+        }
+    }
+
+    /** 把数据文件复制到外部私有目录，方便文件管理器查看 */
+    private fun exportDataCopy() {
+        runCatching {
+            val target = java.io.File(getExternalFilesDir(null), "UniBoard数据").apply { mkdirs() }
+            var copied = 0
+            val names = listOf(
+                "user_lexicon.tsv", "user_history.tsv", "quick_phrases.txt",
+                "clip_history.txt", "uniboard_settings.xml"
+            )
+            for (name in names) {
+                val src = java.io.File(filesDir, name)
+                if (!src.exists()) continue
+                src.copyTo(java.io.File(target, name), overwrite = true)
+                copied++
+            }
+            toast("已导出 $copied 个文件到 $target")
+        }.onFailure { toast("导出失败：" + (it.message ?: "")) }
     }
 
     private fun buildPrivacy() {

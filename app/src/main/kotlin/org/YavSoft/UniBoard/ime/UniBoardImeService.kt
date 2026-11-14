@@ -262,6 +262,11 @@ class UniBoardImeService : InputMethodService(),
     private fun handleHardwareText(text: String) {
         if (text.isEmpty()) return
         val ch = text[0]
+        // 设置里可把外接键盘固定成英文直出（不经过拼音/九键的组合链路）
+        if (prefs.hardwareDirectLatin) {
+            commitDirect(text)
+            return
+        }
         if (ch.isLetter() || ch.isDigit() || ch == ' ') {
             handleInsert(text)
         } else {
@@ -405,9 +410,10 @@ class UniBoardImeService : InputMethodService(),
                 Layouts.strokeKey(modeLabel(), isChineseMode)
             mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_T9_EN ->
                 Layouts.nineKey(modeLabel(), isChineseMode)
-            // 日文：全键盘布局，输入罗马字转假名
+            // 日文：全键盘布局 + 假名标点行，输入罗马字转假名
             mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_KANA ->
-                Layouts.buildLatin(upper = false, chinese = false, numberRow = false)
+                Layouts.kanaRomaji(modeLabel())
+            layoutId == Layouts.KANA -> Layouts.kanaRomaji(modeLabel())
             mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_ZHUYIN ->
                 Layouts.zhuyin(modeLabel(), prefs.zhuyinTraditional)
             layoutId == Layouts.ZHUYIN -> Layouts.zhuyin(modeLabel(), prefs.zhuyinTraditional)
@@ -780,14 +786,7 @@ class UniBoardImeService : InputMethodService(),
             KeyAction.AiSuggest -> aiSuggest()
             is KeyAction.MingKwai -> handleMingKwai(action.id)
             is KeyAction.Stroke -> handleStroke(action.type)
-            is KeyAction.MingKwaiHint -> {
-                val shape = engine.mingKwai.shapeKeys.getOrNull(action.id)
-                val members = shape?.members.orEmpty()
-                toast(
-                    if (members.isEmpty()) "字根：${shape?.label.orEmpty()}"
-                    else "字根「${shape?.label.orEmpty()}」含写法：${members.toCharArray().joinToString(" ")}"
-                )
-            }
+            is KeyAction.MingKwaiHint -> Unit
             KeyAction.RepeatLast -> repeatLastInput()
             KeyAction.ToggleTraditional -> {
                 prefs.zhuyinTraditional = !prefs.zhuyinTraditional
@@ -1097,10 +1096,7 @@ class UniBoardImeService : InputMethodService(),
     /** 重输：把上一次提交的内容再上屏一次 */
     private fun repeatLastInput() {
         val text = lastCommitted
-        if (text.isNullOrEmpty()) {
-            toast("暂无可重输的内容")
-            return
-        }
+        if (text.isNullOrEmpty()) return
         composer.commit(if (mode == InputMode.LATIN) "$text " else text)
         updateCandidates()
     }
@@ -1161,18 +1157,6 @@ class UniBoardImeService : InputMethodService(),
             refreshLayout()
             updateCandidates()
         }
-        toast(
-            when (type) {
-                Prefs.KB_NINE -> "已切换到九键（T9）键盘"
-                Prefs.KB_MINGKWAI -> "已切换到明快键盘"
-                Prefs.KB_SHUANGPIN -> "已切换到双拼（小鹤）"
-                Prefs.KB_STROKE -> "已切换到笔画输入"
-                Prefs.KB_ZHUYIN -> "已切换到注音输入"
-                Prefs.KB_T9_EN -> "已切换到英文九键"
-                Prefs.KB_KANA -> "已切换到日文（罗马字）"
-                else -> "已切换到全键盘"
-            }
-        )
     }
 
     /** 底部切换键显示"下一个模式"，点一下即可切过去 */
@@ -1255,10 +1239,7 @@ class UniBoardImeService : InputMethodService(),
     override fun onGlide(letters: List<String>) {
         if (!prefs.gestureInput || letters.size < 2) return
         val words = engine.decodeGlide(letters, prefs.candidateCount)
-        if (words.isEmpty()) {
-            toast("未识别到手势，可稍慢一些或改用点击输入")
-            return
-        }
+        if (words.isEmpty()) return
         val best = words.first()
         val word = best.text
         if (prefs.learningEnabled && !prefs.privacyMode && !secureInput) {

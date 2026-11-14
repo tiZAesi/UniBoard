@@ -277,6 +277,11 @@ class Prefs(context: Context) {
         get() = readBool(K_MIXED_EN, true)
         set(v) = sp.edit().putBoolean(K_MIXED_EN, v).apply()
 
+    /** 外接键盘：固定英文直出，不走拼音/九键组合 */
+    var hardwareDirectLatin: Boolean
+        get() = readBool("hardware_direct_latin", false)
+        set(v) = sp.edit().putBoolean("hardware_direct_latin", v).apply()
+
     /** 注音输入输出繁体 */
     var zhuyinTraditional: Boolean
         get() = readBool("zhuyin_traditional", false)
