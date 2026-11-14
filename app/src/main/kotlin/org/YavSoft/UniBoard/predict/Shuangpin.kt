@@ -12,72 +12,165 @@
 package org.YavSoft.UniBoard.predict
 
 /**
- * 双拼解码（小鹤双拼方案）。
+ * 双拼方案。
  *
- * 双拼把每个音节压成两键：**声母键 + 韵母键**。
- * 小鹤的声母基本沿用字母，只有三个翘舌音单独占一个键：
- * v→zh、i→ch、u→sh；零声母音节（a、ai、an…）直接按韵母键。
+ * 每个方案都是一张「两键码 → 音节」表，由 `tools/gen_shuangpin.py` 从
+ * Rime 的拼写代数生成（见 [ShuangpinTables]）。方案之间只是键位不同，
+ * 解码出来的全拼完全一致，因此词库、纠错、联想全部照旧复用。
+ */
+enum class ShuangpinScheme(val id: Int, val label: String, val short: String) {
+    /** 小鹤双拼：最流行的方案，zh/ch/sh 占 v/i/u */
+    XIAOHE(0, "小鹤双拼", "小鹤"),
+
+    /** 自然码：老牌方案 */
+    ZIRANMA(1, "自然码", "自然码"),
+
+    /** 微软双拼：ing 落在「;」键，键盘要补一个键 */
+    MSPY(2, "微软双拼", "微软"),
+
+    /** 智能 ABC：零声母统一加 o 前缀 */
+    ABC(3, "智能 ABC", "ABC"),
+
+    /** 拼音加加 */
+    PYJJ(4, "拼音加加", "加加");
+
+    /** 该方案的 ing 韵母在「;」键上，键盘需要补一个 ; 键才打得出来 */
+    val needsSemicolon: Boolean get() = this == MSPY
+
+    companion object {
+        val ALL: List<ShuangpinScheme> = entries
+
+        fun of(id: Int): ShuangpinScheme = entries.getOrElse(id) { XIAOHE }
+
+        fun labels(): List<String> = entries.map { it.label }
+    }
+}
+
+/**
+ * 双拼解码。
  *
- * 解码结果是一串全拼，直接交给现有的拼音引擎，因此词库、纠错、联想全部复用。
+ * 双拼把每个音节压成两键：**声母键 + 韵母键**。解码器不逐对贪心切分，而是
+ * 在整串输入上做一次动态规划：两键码优先，其次单键零声母，都不认识的键
+ * 原样留在拼音串里。这样即使中间有一个键打错，前后已经打对的音节也不会
+ * 跟着错位 —— 逐对贪心切分最容易犯的毛病。
+ *
+ * 解码结果是一串全拼，直接交给现有的拼音引擎。
  */
 object Shuangpin {
 
-    /** 韵母键位表（小鹤双拼） */
-    private val FINALS: Map<Char, String> = mapOf(
-        'q' to "iu", 'w' to "ei", 'e' to "e", 'r' to "uan", 't' to "ve",
-        'y' to "un", 'u' to "u", 'i' to "i", 'o' to "uo", 'p' to "ie",
-        'a' to "a", 's' to "ong", 'd' to "ai", 'f' to "en", 'g' to "eng",
-        'h' to "ang", 'j' to "an", 'k' to "ing", 'l' to "iang",
-        'z' to "ou", 'x' to "ia", 'c' to "ao", 'v' to "ui",
-        'b' to "in", 'n' to "iao", 'm' to "ian"
+    /** 一个方案的解码表 */
+    class Table(
+        /** 两键码 → 音节 */
+        val syllables: Map<String, String>,
+        /** 单键码 → 零声母音节 */
+        val singles: Map<Char, String>,
+        /** 键位 → 该键当韵母时代表什么（给键帽角标） */
+        val finalHints: Map<Char, String>
     )
 
-    /** 声母键位表：小鹤里 zh/ch/sh 各占一键 */
-    private val INITIALS: Map<Char, String> = mapOf(
-        'v' to "zh", 'i' to "ch", 'u' to "sh",
-        'b' to "b", 'p' to "p", 'm' to "m", 'f' to "f", 'd' to "d", 't' to "t",
-        'n' to "n", 'l' to "l", 'g' to "g", 'k' to "k", 'h' to "h", 'j' to "j",
-        'q' to "q", 'x' to "x", 'r' to "r", 'z' to "z", 'c' to "c", 's' to "s",
-        'y' to "y", 'w' to "w"
-    )
+    private val cache = HashMap<Int, Table>(4)
 
-    /** 零声母音节（按其韵母键单独成音节） */
-    private val STANDALONE: Map<Char, String> = mapOf(
-        'a' to "a", 'o' to "o", 'e' to "e", 'd' to "ai", 'w' to "ei",
-        'c' to "ao", 'z' to "ou", 'j' to "an", 'f' to "en", 'h' to "ang",
-        'g' to "eng", 'r' to "er"
-    )
+    private const val NEG = Int.MIN_VALUE / 4
 
-    /** 把双拼输入串解码成全拼串 */
-    fun toPinyin(input: String): String {
-        if (input.isEmpty()) return ""
-        val sb = StringBuilder(input.length * 2)
-        var i = 0
-        while (i < input.length) {
-            val first = input[i].lowercaseChar()
-            if (i + 1 < input.length) {
-                val second = input[i + 1].lowercaseChar()
-                val initial = INITIALS[first]
-                val fin = FINALS[second]
-                if (initial != null && fin != null) {
-                    sb.append(initial).append(fin)
-                    i += 2
-                    continue
-                }
-            }
-            // 单键：零声母音节
-            val solo = STANDALONE[first] ?: FINALS[first]
-            if (solo != null) {
-                sb.append(solo)
-                i += 1
-            } else {
-                sb.append(first)
-                i += 1
-            }
+    /** 命中一个音节得多少分 */
+    private const val SCORE_SYLLABLE = 20
+
+    /** 落单一个字符的扣分：够低，但只要别无选择仍然能出字 */
+    private const val PENALTY_GAP = 12
+
+    /** 取方案表（首次调用时解析常量串，之后走缓存） */
+    fun table(scheme: ShuangpinScheme): Table = synchronized(cache) {
+        cache.getOrPut(scheme.id) {
+            // 方案 id 越界时退回第一个方案，宁可用错键位也不要崩
+            val raw = ShuangpinTables.RAW.getOrElse(scheme.id) { ShuangpinTables.RAW[0] }
+            Table(
+                syllables = parsePairs(raw.codes).associate { it.first to it.second },
+                singles = parsePairs(raw.singles).associate { pair -> pair.first[0] to pair.second },
+                finalHints = parsePairs(raw.hints).associate { pair -> pair.first[0] to pair.second }
+            )
         }
-        return sb.toString()
     }
 
-    /** 键位提示：给双拼键盘显示「该键当韵母时代表什么」 */
-    fun finalHint(key: Char): String = FINALS[key.lowercaseChar()] ?: ""
+    private fun parsePairs(src: String): List<Pair<String, String>> {
+        if (src.isEmpty()) return emptyList()
+        val out = ArrayList<Pair<String, String>>(512)
+        for (token in src.split(' ')) {
+            if (token.isEmpty()) continue
+            val eq = token.indexOf('=')
+            if (eq <= 0 || eq == token.length - 1) continue
+            // 同码多音节时表里存成 a|b，解码取首选
+            out.add(token.substring(0, eq) to token.substring(eq + 1).substringBefore('|'))
+        }
+        return out
+    }
+
+    /** 把双拼输入串解码成全拼串 */
+    fun toPinyin(input: String, scheme: ShuangpinScheme = ShuangpinScheme.XIAOHE): String {
+        val parts = syllables(input, scheme)
+        return parts.joinToString("")
+    }
+
+    /**
+     * 把双拼输入串切成音节序列。
+     *
+     * 例如小鹤方案下 `nihcvsgo` → [ni, hao, zhong, guo]。
+     * 切不出来的键会原样作为一个片段返回，方便候选栏显示「还差什么」。
+     */
+    fun syllables(input: String, scheme: ShuangpinScheme = ShuangpinScheme.XIAOHE): List<String> {
+        if (input.isEmpty()) return emptyList()
+        val t = table(scheme)
+        val s = input.lowercase()
+        val n = s.length
+        val best = IntArray(n + 1) { NEG }
+        val from = IntArray(n + 1)
+        val piece = arrayOfNulls<String>(n + 1)
+        best[0] = 0
+
+        for (i in 0 until n) {
+            if (best[i] == NEG) continue
+            val base = best[i]
+            // 1) 两键码：绝大多数音节走这里
+            if (i + 2 <= n) {
+                val hit = t.syllables[s.substring(i, i + 2)]
+                if (hit != null) {
+                    val score = base + SCORE_SYLLABLE
+                    if (score > best[i + 2]) {
+                        best[i + 2] = score
+                        from[i + 2] = i
+                        piece[i + 2] = hit
+                    }
+                }
+            }
+            // 2) 单键零声母（部分方案把 a / o / e 类音节放在单键上）
+            val single = t.singles[s[i]]
+            if (single != null) {
+                val score = base + SCORE_SYLLABLE - 1
+                if (score > best[i + 1]) {
+                    best[i + 1] = score
+                    from[i + 1] = i
+                    piece[i + 1] = single
+                }
+            }
+            // 3) 兜底：这个键没匹配上，原样带下去
+            val gap = base - PENALTY_GAP
+            if (gap > best[i + 1]) {
+                best[i + 1] = gap
+                from[i + 1] = i
+                piece[i + 1] = s[i].toString()
+            }
+        }
+
+        val parts = ArrayList<String>(n / 2 + 1)
+        var p = n
+        while (p > 0) {
+            parts.add(piece[p] ?: "")
+            p = from[p]
+        }
+        parts.reverse()
+        return parts.filter { it.isNotEmpty() }
+    }
+
+    /** 键位提示：该键当韵母时代表什么（给键帽角标用） */
+    fun finalHint(key: Char, scheme: ShuangpinScheme = ShuangpinScheme.XIAOHE): String =
+        table(scheme).finalHints[key.lowercaseChar()] ?: ""
 }

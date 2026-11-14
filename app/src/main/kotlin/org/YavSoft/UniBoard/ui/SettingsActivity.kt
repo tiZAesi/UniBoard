@@ -18,7 +18,9 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import org.YavSoft.UniBoard.R
 import org.YavSoft.UniBoard.ai.AiClient
+import org.YavSoft.UniBoard.core.KeyboardKind
 import org.YavSoft.UniBoard.core.Prefs
+import org.YavSoft.UniBoard.predict.ShuangpinScheme
 import org.YavSoft.UniBoard.core.dpInt
 import org.YavSoft.UniBoard.script.ScriptEngine
 import org.YavSoft.UniBoard.ui.theme.KeyboardThemes
@@ -163,14 +165,35 @@ class SettingsActivity : SettingsBase() {
         subtitle("默认使用 Unicode 直输盘，通过输入十六进制码点选择字符。")
         section("默认输入模式")
         val c1 = card()
-        choice(c1, listOf("全键盘", "九键（T9）", "明快（上下形取字）"), prefs.keyboardType) {
-            prefs.keyboardType = it
+        // 键盘清单只有一份（KeyboardKind），这里不再手抄一份选项名，
+        // 否则面板里能选的键盘在设置页里选不到、一切换就被改回去。
+        val kinds = KeyboardKind.chinese + KeyboardKind.others
+        val kindIndex = kinds.indexOfFirst { it.id == prefs.keyboardType }.coerceAtLeast(0)
+        choice(c1, kinds.map { it.label }, kindIndex) {
+            prefs.keyboardType = kinds[it].id
             recreate()
         }
         choice(c1, listOf("Unicode 直输", "中文拼音", "英文"), prefs.defaultMode.coerceIn(0, 2)) {
             prefs.defaultMode = it
             recreate()
         }
+        section("双拼与日文")
+        val c1b = card()
+        choice(c1b, ShuangpinScheme.labels(), prefs.shuangpinScheme) {
+            prefs.shuangpinScheme = it
+            recreate()
+        }
+        toggle(c1b, "日文汉字转换", "假名转汉字（关掉只输出假名与片假名）", prefs.kanaKanji) {
+            prefs.kanaKanji = it
+        }
+        toggle(c1b, "日文优先片假名", "候选栏把片假名排在最前面，适合外来语较多的时候", prefs.kanaKatakanaFirst) {
+            prefs.kanaKatakanaFirst = it
+        }
+        c1b.addView(TextView(this).apply {
+            text = "日文词表由 JMdict（常用词）与 KANJIDIC2 生成，随应用离线打包，不做任何联网查询。"
+            textSize = 12f
+            setPadding(dpInt(16f), 0, dpInt(16f), dpInt(12f))
+        })
         section("键盘尺寸")
         val c2 = card()
         slider(c2, "键盘高度", 0.26f, 0.46f, 0.02f, prefs.keyboardHeightPercent) {
@@ -248,7 +271,7 @@ class SettingsActivity : SettingsBase() {
         toggle(c6, "剪贴板面板", "", prefs.toolClipboard) { prefs.toolClipboard = it }
         toggle(c6, "AI 润色", "需先在「AI 助手」中启用", prefs.toolAi) { prefs.toolAi = it }
         toggle(c6, "文本编辑面板", "光标移动 / 全选 / 复制粘贴", prefs.toolEdit) { prefs.toolEdit = it }
-        toggle(c6, "切换键盘", "在候选栏里循环切换全键盘 / 九键 / 明快", prefs.toolKeyboard) {
+        toggle(c6, "切换键盘", "在候选栏里打开键盘选择面板", prefs.toolKeyboard) {
             prefs.toolKeyboard = it
         }
         toggle(c6, "光标左移", "候选栏放一个左移键", prefs.toolCursorLeft) {
@@ -564,6 +587,34 @@ class SettingsActivity : SettingsBase() {
             setTextColor(0xFF757575.toInt())
             setPadding(dpInt(16f), dpInt(12f), dpInt(16f), dpInt(12f))
         })
+
+        section("输入统计")
+        val st = org.YavSoft.UniBoard.core.InputStats(this)
+        val snap = st.snapshot()
+        val statsCard = card()
+        statsCard.addView(TextView(this).apply {
+            text = "累计上屏 ${snap.totalChars} 字 · 今天 ${snap.todayChars} 字 · " +
+                "按键 ${snap.keys} 次 · 上屏 ${snap.commits} 次"
+            textSize = 13f
+            setTextColor(0xFF757575.toInt())
+            setPadding(dpInt(16f), dpInt(12f), dpInt(16f), dpInt(6f))
+        })
+        statsCard.addView(TextView(this).apply {
+            text = "统计只写在本机应用私有目录，不联网、不上报。"
+            textSize = 12f
+            setTextColor(0xFF757575.toInt())
+            setPadding(dpInt(16f), 0, dpInt(16f), dpInt(10f))
+        })
+        toggle(statsCard, "记录输入统计", "关掉后不再计数，已有数据保留", prefs.inputStats) {
+            prefs.inputStats = it
+        }
+        action(statsCard, "清空输入统计") {
+            confirm("清空输入统计？") {
+                st.reset()
+                toast("已清空")
+                recreate()
+            }
+        }
 
         section("数据文件")
         val files = card()

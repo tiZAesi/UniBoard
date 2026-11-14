@@ -11,8 +11,8 @@ android {
         applicationId = "org.YavSoft.UniBoard"
         minSdk = 26
         targetSdk = 34
-        versionCode = 24
-        versionName = "LabicBuild-1.0.3.7"
+        versionCode = 25
+        versionName = "LabicBuild-1.0.4.0"
         resourceConfigurations += listOf("en", "zh")
     }
 
@@ -28,7 +28,7 @@ android {
 
     // 字体与词库资源保持未压缩，便于运行时随机读取
     androidResources {
-        noCompress += listOf("ttf", "otf", "ttc", "lex", "bin")
+        noCompress += listOf("ttf", "otf", "ttc", "lex", "bin", "gz")
     }
 
     compileOptions {

@@ -1,7 +1,16 @@
 /*
  * UniBoard — Unicode 输入法
  * Copyright (C) 2026 UniBoard contributors
- * 本程序依 GPL-3.0-or-later 授权。
+ *
+ * 本程序是自由软件：你可以依据 GNU 通用公共许可证（GPL）第 3 版
+ * 或（你选择的）任何更新版本所规定的条款，重新分发和/或修改它。
+ *
+ * 本程序按“希望有用”的方式分发，但不提供任何担保；
+ * 甚至不包含适销性或特定用途适用性的默示担保。
+ * 详见 GNU 通用公共许可证。
+ *
+ * 你应当已随本程序收到 GNU 通用公共许可证的副本；
+ * 如果没有，见 <https://www.gnu.org/licenses/>。
  */
 
 package org.YavSoft.UniBoard.predict

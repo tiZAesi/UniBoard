@@ -27,6 +27,9 @@ import org.YavSoft.UniBoard.ai.AiClient
 import org.YavSoft.UniBoard.R
 import org.YavSoft.UniBoard.core.InputMode
 import org.YavSoft.UniBoard.unicode.CodeInputEngine
+import org.YavSoft.UniBoard.core.InputStats
+import org.YavSoft.UniBoard.core.KeyboardGroup
+import org.YavSoft.UniBoard.core.KeyboardKind
 import org.YavSoft.UniBoard.core.Prefs
 import org.YavSoft.UniBoard.core.dpInt
 import org.YavSoft.UniBoard.font.FontResolver
@@ -37,6 +40,8 @@ import org.YavSoft.UniBoard.keyboard.KeyboardView
 import org.YavSoft.UniBoard.keyboard.Layouts
 import org.YavSoft.UniBoard.predict.Candidate
 import org.YavSoft.UniBoard.predict.PredictionEngine
+import org.YavSoft.UniBoard.predict.RomajiKana
+import org.YavSoft.UniBoard.predict.ShuangpinScheme
 import org.YavSoft.UniBoard.ui.theme.KeyboardTheme
 import org.YavSoft.UniBoard.ui.theme.KeyboardThemes
 
@@ -55,6 +60,7 @@ class UniBoardImeService : InputMethodService(),
     private lateinit var composer: TextComposer
     private lateinit var script: org.YavSoft.UniBoard.script.ScriptEngine
     private lateinit var theme: KeyboardTheme
+    private lateinit var stats: InputStats
 
     private var rootView: LinearLayout? = null
     private var columnView: LinearLayout? = null
@@ -69,36 +75,44 @@ class UniBoardImeService : InputMethodService(),
     private var mode: InputMode = InputMode.PINYIN
     private var layoutId: String = Layouts.LATIN
 
+    /**
+     * 当前键盘种类。唯一真相存在 [Prefs] 里，取值是 [KeyboardKind.id]。
+     * 屏幕上到底显示哪张键盘由 [resolveLayout] 决定，这里不再维护第二份状态。
+     */
+    private val kind: KeyboardKind get() = prefs.keyboardKind
+
     /** 当前是否为九键（T9）拼音键盘：为真时数字键进入组合串并走数字预测 */
     private var nineActive: Boolean = false
 
-    /** 当前是否为明快键盘：为真时形状键走两键取字 */
+    /** 当前是否为明快键盘（两页都算）：为真时形状键走两键取字 */
     private var mkActive: Boolean = false
-
-    /** 当前是否为笔画键盘 */
-    private var strokeActive: Boolean = false
 
     /** 英文九键：九键布局 + 英文词库 */
     private val t9EnActive: Boolean
-        get() = nineActive && prefs.keyboardType == Prefs.KB_T9_EN
+        get() = nineActive && kind == KeyboardKind.T9_EN
 
     /** 双拼：全键盘布局 + 双拼解码 */
     private val shuangpinActive: Boolean
-        get() = mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_SHUANGPIN
+        get() = mode == InputMode.PINYIN && kind == KeyboardKind.SHUANGPIN
 
     /** 注音：注音符号键盘 */
     private val zhuyinActive: Boolean
-        get() = mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_ZHUYIN
+        get() = mode == InputMode.PINYIN && kind == KeyboardKind.ZHUYIN
 
-    /** 日文：全键盘 + 罗马字转假名 */
+    /** 日文罗马字键盘 */
     private val kanaActive: Boolean
-        get() = mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_KANA
+        get() = mode == InputMode.PINYIN && kind == KeyboardKind.KANA
+
+    /** 日文五十音键盘（直接点假名） */
+    private val kana50Active: Boolean
+        get() = mode == InputMode.PINYIN && kind == KeyboardKind.KANA50
+
+    /** 当前是否任何日文键盘 */
+    private val japaneseActive: Boolean
+        get() = mode == InputMode.PINYIN && kind.japanese
 
     /** 九键内部编码：数字串只在内部使用，界面上显示拼音 */
     private var t9Digits: String = ""
-
-    /** 笔画输入已敲的笔画串（1–5，0 为通配） */
-    private var strokeCode: String = ""
 
     /** 英文九键已敲的数字串 */
     private var t9eDigits: String = ""
@@ -138,9 +152,15 @@ class UniBoardImeService : InputMethodService(),
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
+        stats = InputStats(this)
         theme = KeyboardThemes.resolve(this, prefs)
         engine = PredictionEngine(this, prefs)
-        engine.initializeAsync()
+        engine.initializeAsync {
+            // 词库（明快字形索引、日文词表）加载完成后重排一次：
+            // 用户选的是明快或日文键盘时，加载完成前只能先退回全键盘，这里补上真正的键盘。
+            refreshLayout()
+            updateCandidates()
+        }
         composer = TextComposer { currentInputConnection }
         script = org.YavSoft.UniBoard.script.ScriptEngine(this)
         mode = if (prefs.chineseMode) InputMode.PINYIN else InputMode.LATIN
@@ -292,6 +312,7 @@ class UniBoardImeService : InputMethodService(),
     override fun onFinishInput() {
         flushLexicon()
         engine.flush()
+        stats.flush()
         super.onFinishInput()
     }
 
@@ -384,64 +405,95 @@ class UniBoardImeService : InputMethodService(),
 
     private fun refreshLayout() {
         val kb = keyboardView ?: return
-        val layout = when {
-            searchTarget != null -> Layouts.buildLatin(upper = false, chinese = false, numberRow = false)
-            pcActive -> Layouts.pcLayout(isChineseMode)
-            numberOnly -> Layouts.numpad()
-            mode == InputMode.UNICODE -> Layouts.unicodePad(modeLabel(), isChineseMode)
-            layoutId == Layouts.SYMBOLS -> Layouts.symbols(isChineseMode)
-            layoutId == Layouts.SYMBOLS_MORE -> Layouts.symbolsMore(isChineseMode)
-            layoutId == Layouts.NINE -> Layouts.nineKey(modeLabel(), isChineseMode)
-            layoutId == Layouts.MINGKWAI -> mingKwaiLayout()
-            layoutId == Layouts.MINGKWAI2 -> mingKwaiLayout(page = 2)
-            shiftOn -> Layouts.buildLatin(upper = true, chinese = isChineseMode, numberRow = prefs.numberRow)
-            // 中文模式下按设置选键盘：全键盘 / 九键 / 明快；符号页与英文模式仍走全键盘
-            mode == InputMode.PINYIN && prefs.keyboardType == 1 ->
-                Layouts.nineKey(modeLabel(), isChineseMode)
-            mode == InputMode.PINYIN && prefs.keyboardType == 2 && engine.mingKwai.isLoaded ->
-                mingKwaiLayout()
-            // 双拼：沿用全键盘，键角标换韵母提示
-            mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_SHUANGPIN ->
-                Layouts.buildLatin(
-                    upper = false, chinese = isChineseMode,
-                    numberRow = prefs.numberRow, finalHints = true
-                )
-            mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_STROKE ->
-                Layouts.strokeKey(modeLabel(), isChineseMode)
-            mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_T9_EN ->
-                Layouts.nineKey(modeLabel(), isChineseMode)
-            // 日文：全键盘布局 + 假名标点行，输入罗马字转假名
-            mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_KANA ->
-                Layouts.kanaRomaji(modeLabel())
-            layoutId == Layouts.KANA -> Layouts.kanaRomaji(modeLabel())
-            mode == InputMode.PINYIN && prefs.keyboardType == Prefs.KB_ZHUYIN ->
-                Layouts.zhuyin(modeLabel(), prefs.zhuyinTraditional)
-            layoutId == Layouts.ZHUYIN -> Layouts.zhuyin(modeLabel(), prefs.zhuyinTraditional)
-            layoutId == Layouts.STROKE -> Layouts.strokeKey(modeLabel(), isChineseMode)
-            layoutId == Layouts.KANA -> Layouts.kana(1, modeLabel())
-            layoutId == Layouts.KANA2 -> Layouts.kana(2, modeLabel())
-            else -> Layouts.buildLatin(upper = false, chinese = isChineseMode, numberRow = prefs.numberRow)
-        }
+        val layout = resolveLayout()
         nineActive = layout.id == Layouts.NINE
-        mkActive = layout.id == Layouts.MINGKWAI
-        strokeActive = layout.id == Layouts.STROKE
+        // 明快有两页，两页都要能两键取字（以前只认第一页，翻到第二页就按不出字）
+        mkActive = layout.id == Layouts.MINGKWAI || layout.id == Layouts.MINGKWAI2
         kb.setLayout(layout)
         kb.shiftLocked = shiftOn
-        kb.spaceHint = when {
-            numberOnly -> null
-            pcActive -> "PC 键盘"
-            mkActive -> "明快输入法"
-            nineActive -> "九键拼音"
-            mode == InputMode.UNICODE -> "Unicode"
-            isChineseMode -> "拼音输入"
-            else -> "English"
+        kb.spaceHint = spaceHintOf()
+        candidateBar?.languageLabel = languageLabel()
+    }
+
+    /**
+     * 当前该显示哪张键盘。
+     *
+     * 优先级（高到低）：面板搜索框 → 数字框 → PC 键盘 → 符号页 → 语言模式 → 键盘种类。
+     *
+     * 关键点：**主布局只由「键盘种类」决定**，不再让 shiftOn 或上一次的页面状态参与判断。
+     * 旧写法把 `shiftOn -> 全键盘` 放在键盘种类判断之前，于是只要大写还开着
+     * （英文句末自动大写、或按过 Shift），切到九键 / 明快 / 双拼就会「切不动」；
+     * 页面状态同理：停在符号页或明快第二页时切键盘，看到的还是原来那一页。
+     * 这两个都是「有时切换键盘没反应」的真实成因，现在由 [applyKeyboardType]
+     * 清掉页面状态、`shiftOn` 只在语言模式分支里生效，从根上断掉。
+     */
+    private fun resolveLayout(): KeyboardLayout {
+        val current = kind
+        // 面板搜索框：固定用拉丁键盘打字
+        if (searchTarget != null) {
+            return Layouts.buildLatin(upper = false, chinese = false, numberRow = false)
         }
-        candidateBar?.languageLabel = when {
-            pcActive -> "PC"
-            mode == InputMode.UNICODE -> "Uni"
-            isChineseMode -> "中"
-            else -> "EN"
+        if (numberOnly) return Layouts.numpad()
+        if (pcActive) return Layouts.pcLayout(isChineseMode)
+        // 符号页对所有键盘通用
+        if (layoutId == Layouts.SYMBOLS) return Layouts.symbols(isChineseMode, current.japanese)
+        if (layoutId == Layouts.SYMBOLS_MORE) return Layouts.symbolsMore(isChineseMode)
+        // 英文模式：无论选的是哪种中文键盘，都回到干净的 QWERTY
+        if (mode == InputMode.LATIN) {
+            return Layouts.buildLatin(
+                upper = shiftOn, chinese = false, numberRow = prefs.numberRow
+            )
         }
+        if (mode == InputMode.UNICODE) return Layouts.unicodePad(modeLabel(), isChineseMode)
+
+        return when (current) {
+            KeyboardKind.MINGKWAI -> {
+                if (engine.mingKwai.isLoaded) {
+                    mingKwaiLayout(if (layoutId == Layouts.MINGKWAI2) 2 else 1)
+                } else {
+                    // 字形词库还没加载好：先给全键盘。加载完成会回调 refreshLayout 自动换回来
+                    Layouts.buildLatin(upper = shiftOn, chinese = isChineseMode, numberRow = prefs.numberRow)
+                }
+            }
+            KeyboardKind.NINE, KeyboardKind.T9_EN -> Layouts.nineKey(modeLabel(), isChineseMode)
+            KeyboardKind.SHUANGPIN -> {
+                val scheme = ShuangpinScheme.of(prefs.shuangpinScheme)
+                Layouts.buildLatin(
+                    upper = false,
+                    chinese = isChineseMode,
+                    numberRow = prefs.numberRow,
+                    scheme = scheme,
+                    semicolonKey = scheme.needsSemicolon
+                )
+            }
+            KeyboardKind.KANA -> Layouts.kanaRomaji(modeLabel())
+            KeyboardKind.KANA50 -> Layouts.kana(if (layoutId == Layouts.KANA2) 2 else 1, modeLabel())
+            KeyboardKind.ZHUYIN -> Layouts.zhuyin(modeLabel(), prefs.zhuyinTraditional)
+            KeyboardKind.FULL -> Layouts.buildLatin(
+                upper = shiftOn, chinese = isChineseMode, numberRow = prefs.numberRow
+            )
+        }
+    }
+
+    /** 空格键上的提示文字：日文键盘显示「変換」 */
+    private fun spaceHintOf(): String? = when {
+        numberOnly -> null
+        pcActive -> "PC 键盘"
+        mkActive -> "明快输入法"
+        nineActive -> if (kind == KeyboardKind.T9_EN) "英文九键" else "九键拼音"
+        kind.japanese -> "変換"
+        mode == InputMode.UNICODE -> "Unicode"
+        isChineseMode -> "拼音输入"
+        else -> "English"
+    }
+
+    /** 候选栏右上角语言标记 */
+    private fun languageLabel(): String = when {
+        pcActive -> "PC"
+        mode == InputMode.UNICODE -> "Uni"
+        japaneseActive -> "あ"
+        isChineseMode -> "中"
+        else -> "EN"
     }
 
     /** 点候选栏叉号：收起整条候选栏，键盘上移 */
@@ -518,31 +570,35 @@ class UniBoardImeService : InputMethodService(),
             return
         }
 
-        // 笔画输入
-        if (strokeActive) {
-            if (strokeCode.isEmpty()) {
-                currentCandidates = emptyList()
-                composer.finishComposing()
-                val emptyBar = candidateBar ?: return
-                emptyBar.candidates = emptyList()
-                emptyBar.statusHint = null
-                emptyBar.toolsVisible = true
-                return
+        // 日文：罗马字 → 假名 → 汉字（五十音键盘则直接是假名 → 汉字）
+        if (japaneseActive && composing.isNotEmpty()) {
+            val converted = if (kanaActive) RomajiKana.convert(composing) else null
+            val kana = converted?.kana ?: composing
+            val pending = converted?.pending.orEmpty()
+            val list = ArrayList<Candidate>(prefs.candidateCount + 4)
+            if (kana.isNotEmpty()) {
+                if (prefs.kanaKanji && engine.kanaKanji.isLoaded) {
+                    list.addAll(engine.kanaKanji.convert(kana, prefs.candidateCount))
+                } else {
+                    list.add(Candidate(text = kana, label = kana, hint = "ひらがな"))
+                    val kata = RomajiKana.toKatakana(kana)
+                    if (kata != kana) list.add(Candidate(text = kata, label = kata, hint = "カタカナ"))
+                }
+                // 外来语场合用户希望先看到片假名：把它挪到第一位
+                if (prefs.kanaKatakanaFirst && list.size > 1) {
+                    val idx = list.indexOfFirst { it.hint == "カタカナ" }
+                    if (idx > 0) {
+                        val kata = list.removeAt(idx)
+                        list.add(0, kata)
+                    }
+                }
             }
-            var words = engine.strokeLexicon.lookup(strokeCode, prefs.candidateCount, tolerance = 1)
-            var corrected = false
-            if (words.isEmpty() && strokeCode.length > 1) {
-                // 纠错：不认识这一笔，就先忽略最后一笔再找一次
-                words = engine.strokeLexicon.lookup(strokeCode.dropLast(1), prefs.candidateCount, 0)
-                corrected = words.isNotEmpty()
-            }
-            currentCandidates = words.map { Candidate(it.text) }
-            correctedHint = if (corrected) "已忽略最后一笔" else null
-            composer.setComposing(strokeLabel(strokeCode))
+            currentCandidates = list
+            correctedHint = null
             val bar = candidateBar ?: return
-            bar.candidates = currentCandidates
-            bar.statusHint = strokeCode.length.toString() + " 笔"
-            bar.toolsVisible = currentCandidates.isEmpty()
+            bar.candidates = list
+            bar.statusHint = if (pending.isEmpty()) kana else kana + pending
+            bar.toolsVisible = list.isEmpty()
             showCandidateBar()
             return
         }
@@ -570,23 +626,6 @@ class UniBoardImeService : InputMethodService(),
             return
         }
 
-        // 日文：罗马字 → 假名，候选给平假名与片假名
-        if (kanaActive && composing.isNotEmpty()) {
-            val hira = org.YavSoft.UniBoard.predict.RomajiKana.toHiragana(composing)
-            val kata = org.YavSoft.UniBoard.predict.RomajiKana.toKatakana(hira)
-            val list = ArrayList<Candidate>(3)
-            if (hira.isNotEmpty()) list.add(Candidate(text = hira, label = hira))
-            if (kata != hira) list.add(Candidate(text = kata, label = kata))
-            currentCandidates = list
-            correctedHint = null
-            val bar = candidateBar ?: return
-            bar.candidates = list
-            bar.statusHint = if (hira.isEmpty()) composing else hira
-            bar.toolsVisible = list.isEmpty()
-            showCandidateBar()
-            return
-        }
-
         // 注音：符号 → 全拼 → 拼音引擎；繁体时把候选转成繁体
         if (zhuyinActive && composing.isNotEmpty()) {
             val py = org.YavSoft.UniBoard.predict.Zhuyin.toPinyin(composing)
@@ -609,13 +648,16 @@ class UniBoardImeService : InputMethodService(),
 
         // 双拼：把键序列解码成全拼再走拼音引擎
         if (shuangpinActive && composing.isNotEmpty()) {
-            val py = org.YavSoft.UniBoard.predict.Shuangpin.toPinyin(composing)
+            val scheme = ShuangpinScheme.of(prefs.shuangpinScheme)
+            val parts = org.YavSoft.UniBoard.predict.Shuangpin.syllables(composing, scheme)
+            val py = parts.joinToString("")
             val res = engine.predict(py, InputMode.PINYIN, prefs.candidateCount)
             currentCandidates = res.candidates
             correctedHint = res.correctedFrom?.let { "已按双拼纠正：$it" }
             val bar = candidateBar ?: return
             bar.candidates = currentCandidates
-            bar.statusHint = py
+            // 状态位显示音节切分：打完 "nihcvsgo" 能一眼看到 ni hao zhong guo
+            bar.statusHint = if (parts.isEmpty()) composing else parts.joinToString(" ")
             bar.toolsVisible = currentCandidates.isEmpty()
             showCandidateBar()
             return
@@ -759,6 +801,7 @@ class UniBoardImeService : InputMethodService(),
         if (composing.isNotEmpty() && currentCandidates.isEmpty()) composing else null
 
     override fun onKey(action: KeyAction) {
+        if (prefs.inputStats) stats.recordKey()
         when (action) {
             is KeyAction.Insert -> handleInsert(action.text)
             KeyAction.Backspace -> handleBackspace()
@@ -785,7 +828,8 @@ class UniBoardImeService : InputMethodService(),
             KeyAction.AiPolish -> aiPolish()
             KeyAction.AiSuggest -> aiSuggest()
             is KeyAction.MingKwai -> handleMingKwai(action.id)
-            is KeyAction.Stroke -> handleStroke(action.type)
+            is KeyAction.SwitchKeyboard -> applyKeyboardType(action.id)
+            is KeyAction.VoiceMark -> handleVoiceMark(action.handakuten)
             is KeyAction.MingKwaiHint -> Unit
             KeyAction.RepeatLast -> repeatLastInput()
             KeyAction.ToggleTraditional -> {
@@ -830,7 +874,20 @@ class UniBoardImeService : InputMethodService(),
 
         // 九键：数字键只是编码，界面显示折算出来的拼音
         if (nineActive && text.length == 1 && text[0] in '1'..'9') {
-            if (prefs.keyboardType == Prefs.KB_T9_EN) t9eDigits += text else t9Digits += text
+            if (kind == KeyboardKind.T9_EN) t9eDigits += text else t9Digits += text
+            updateCandidates()
+            return
+        }
+        // 双拼：微软系 / 搜狗系的 ing 落在「;」键上，这个键也要进组合串，
+        // 否则会被当成标点直接上屏，ing 永远打不出来
+        if (shuangpinActive && text == ";") {
+            composer.append(';')
+            updateCandidates()
+            return
+        }
+        // 日文五十音键盘：点到的假名进组合串，空格再转汉字
+        if (kana50Active && text.length == 1 && RomajiKana.isKana(text[0])) {
+            composer.append(text[0])
             updateCandidates()
             return
         }
@@ -864,6 +921,7 @@ class UniBoardImeService : InputMethodService(),
         lastCommitted = out
         val needSpace = mode == InputMode.LATIN && out.last().isLetterOrDigit()
         composer.commit(if (needSpace) "$out " else out)
+        if (prefs.inputStats) stats.recordCommit(out)
         if (out.isNotBlank()) {
             if (prefs.learningEnabled) engine.noteCommit(out.trim(), lastWord)
             lastWord = out.trim()
@@ -872,11 +930,6 @@ class UniBoardImeService : InputMethodService(),
     }
 
     private fun handleBackspace() {
-        if (strokeActive && strokeCode.isNotEmpty()) {
-            strokeCode = strokeCode.dropLast(1)
-            updateCandidates()
-            return
-        }
         if (t9EnActive && t9eDigits.isNotEmpty()) {
             t9eDigits = t9eDigits.dropLast(1)
             updateCandidates()
@@ -1003,12 +1056,7 @@ class UniBoardImeService : InputMethodService(),
     }
 
     private fun setMode(next: InputMode) {
-        composer.finishComposing()
-        t9Digits = ""
-        t9eDigits = ""
-        strokeCode = ""
-        mkFirst = -1
-        mkSecond = -1
+        resetComposing()
         mode = next
         prefs.defaultMode = when (next) {
             InputMode.PINYIN -> Prefs.MODE_PINYIN
@@ -1021,6 +1069,17 @@ class UniBoardImeService : InputMethodService(),
         lastWord = null
         refreshLayout()
         updateCandidates()
+    }
+
+    /** 清掉所有编码中间态：切键盘、切模式、换输入框时都要走一遍 */
+    private fun resetComposing() {
+        composer.finishComposing()
+        t9Digits = ""
+        t9eDigits = ""
+        mkFirst = -1
+        mkSecond = -1
+        currentCandidates = emptyList()
+        correctedHint = null
     }
 
     /** 明快候选：取 8 字窗口，本机用得多的字往前排 */
@@ -1054,30 +1113,6 @@ class UniBoardImeService : InputMethodService(),
         val lex = engine.mingKwai
         if (!lex.isLoaded) return Layouts.buildLatin(upper = false, chinese = isChineseMode, numberRow = false)
         return Layouts.mingkwai(lex.shapeKeys, modeLabel(), isChineseMode, page)
-    }
-
-    /** 笔画键：把笔画追加到笔画串 */
-    private fun handleStroke(type: Int) {
-        strokeCode += type.toString()
-        updateCandidates()
-    }
-
-    /** 笔画串转成可读的笔画名，用作组合区预览 */
-    private fun strokeLabel(code: String): String {
-        val sb = StringBuilder(code.length)
-        for (c in code) {
-            sb.append(
-                when (c) {
-                    '1' -> '一'
-                    '2' -> '丨'
-                    '3' -> '丿'
-                    '4' -> '丶'
-                    '5' -> '乙'
-                    else -> '？'
-                }
-            )
-        }
-        return sb.toString()
     }
 
     /** 明快键盘：第一键记上形，第二键记下形，第三键起重新开始 */
@@ -1143,20 +1178,53 @@ class UniBoardImeService : InputMethodService(),
         syncChromeVisibility()
     }
 
-    /** 选定键盘类型：九键与明快都属于中文输入，顺手切到拼音模式 */
+    /**
+     * 选定键盘种类。
+     *
+     * 这里必须把「页面状态」和「大写状态」一起清掉：`layoutId` 原本会被符号页、
+     * 明快第二页、五十音第二页占用，不清就会出现「点了九键，界面还停在符号页」；
+     * `shiftOn` 则是英文句末自动大写的残留，不清会让开关一次后仍然显示大写键盘。
+     * 清完再重排，无论当前处在什么状态，选中的键盘都一定会生效。
+     */
     private fun applyKeyboardType(type: Int) {
-        prefs.keyboardType = type
-        mkFirst = -1
-        mkSecond = -1
-        t9Digits = ""
-        composer.finishComposing()
+        val target = KeyboardKind.of(type)
+        prefs.keyboardType = target.id
+        layoutId = Layouts.LATIN
+        resetComposing()
+        shiftOn = false
+        shiftLocked = false
         hideKeyboardPicker()
-        if (type != Prefs.KB_FULL && mode != InputMode.PINYIN) {
+        val needsComposing = target.group == KeyboardGroup.CHINESE || target.japanese ||
+            target == KeyboardKind.T9_EN
+        if (needsComposing && mode != InputMode.PINYIN) {
             setMode(InputMode.PINYIN)
         } else {
             refreshLayout()
             updateCandidates()
         }
+        // 明快 / 日文的词库是异步加载的：加载完成会回调 refreshLayout 自动换成真正的键盘，
+        // 这里只是提前告诉用户「不是点错了」
+        if (target.needsLexicon && !isLexiconReady(target)) {
+            toast("${target.label}的词库正在加载，马上就好")
+        }
+    }
+
+    /** 该键盘依赖的词库是否已经可用 */
+    private fun isLexiconReady(target: KeyboardKind): Boolean = when {
+        target == KeyboardKind.MINGKWAI -> engine.mingKwai.isLoaded
+        target.japanese -> !prefs.kanaKanji || engine.kanaKanji.isLoaded
+        else -> true
+    }
+
+    /** 日文：给组合区最后一个假名加浊点 / 半浊点 */
+    private fun handleVoiceMark(handakuten: Boolean) {
+        val input = composer.composing
+        if (input.isEmpty()) return
+        // 罗马字键盘上「゛」也常用：先把罗马字折成假名再加点
+        val base = if (kanaActive) RomajiKana.convert(input).kana else input
+        val voiced = RomajiKana.voice(base, handakuten) ?: return
+        composer.setComposing(voiced)
+        updateCandidates()
     }
 
     /** 底部切换键显示"下一个模式"，点一下即可切过去 */
@@ -1200,11 +1268,9 @@ class UniBoardImeService : InputMethodService(),
             learnWord(word)
         }
         // 英文候选（英文模式或中英混输内联的英文词）提交后补一个空格
-        if (mode == InputMode.LATIN || c.english) {
-            composer.commit("$word ")
-        } else {
-            composer.commit(word)
-        }
+        val committed = if (mode == InputMode.LATIN || c.english) "$word " else word
+        composer.commit(committed)
+        if (prefs.inputStats) stats.recordCommit(committed)
         lastWord = word
         correctedHint = null
         if (nineActive) {
@@ -1213,10 +1279,6 @@ class UniBoardImeService : InputMethodService(),
         }
         if (t9EnActive) {
             t9eDigits = ""
-            composer.finishComposing()
-        }
-        if (strokeActive) {
-            strokeCode = ""
             composer.finishComposing()
         }
         currentCandidates = engine.suggestNext(word)
@@ -1672,6 +1734,7 @@ class UniBoardImeService : InputMethodService(),
     override fun onEvaluateFullscreenMode(): Boolean = false
 
     override fun onDestroy() {
+        runCatching { stats.flush() }
         engine.flush()
         super.onDestroy()
     }

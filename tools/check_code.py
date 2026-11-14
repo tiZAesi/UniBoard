@@ -16,7 +16,9 @@ def load_resources():
             txt = io.open(os.path.join(values, fn), encoding="utf-8").read()
             for kind in ("string", "color", "style", "dimen"):
                 for m in re.finditer(r'<%s\s+name="([^"]+)"' % kind, txt):
-                    res[kind].add(m.group(1))
+                    # AAPT 会把名字里的 '.' 变成 '_'（Theme.UniBoard.Dialog → R.style.Theme_UniBoard_Dialog），
+                    # 这里必须一起换，否则每条 style/color 引用都会被误判成「未定义」
+                    res[kind].add(m.group(1).replace('.', '_'))
     for kind in ("drawable", "layout", "anim", "xml", "mipmap"):
         d = os.path.join(APP, "res", kind)
         if os.path.isdir(d):
@@ -101,7 +103,8 @@ def main():
         rel = os.path.relpath(path, ROOT)
         src = io.open(path, encoding="utf-8").read()
         # 1) 资源引用
-        for m in re.finditer(r'\bR\.(string|color|style|dimen|drawable|layout|mipmap|xml|anim)\.([A-Za-z0-9_]+)', src):
+        # 前面不能是 '.' 或标识符字符：android.R.color.xxx 是系统资源，不归本项目管
+        for m in re.finditer(r'(?<![.\w])R\.(string|color|style|dimen|drawable|layout|mipmap|xml|anim)\.([A-Za-z0-9_]+)', src):
             kind, name = m.group(1), m.group(2)
             if name not in res.get(kind, set()):
                 problems.append(f"{rel}: 未定义资源 R.{kind}.{name}")

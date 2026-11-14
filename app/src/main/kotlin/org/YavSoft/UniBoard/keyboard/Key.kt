@@ -88,14 +88,17 @@ sealed interface KeyAction {
     /** 重输：再次上屏上一次提交的文本 */
     data object RepeatLast : KeyAction
 
-    /** 循环切换键盘类型：全键盘 → 九键 → 明快 */
+    /** 打开键盘选择面板 */
     data object CycleKeyboard : KeyAction
+
+    /** 直接切到指定键盘（[org.YavSoft.UniBoard.core.KeyboardKind.id]） */
+    data class SwitchKeyboard(val id: Int) : KeyAction
 
     /** 明快键盘：长按字根键时提示该形状包含哪些写法 */
     data class MingKwaiHint(val id: Int) : KeyAction
 
-    /** 笔画键盘：1 横 2 竖 3 撇 4 点/捺 5 折 */
-    data class Stroke(val type: Int) : KeyAction
+    /** 日文：给组合区最后一个假名加浊点 / 半浊点（か＋゛→が） */
+    data class VoiceMark(val handakuten: Boolean = false) : KeyAction
 
     /** 注音键盘：简繁输出切换 */
     data object ToggleTraditional : KeyAction

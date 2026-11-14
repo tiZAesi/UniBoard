@@ -260,17 +260,61 @@ class Prefs(context: Context) {
         get() = readBool(K_INITIALS, true)
         set(v) = sp.edit().putBoolean(K_INITIALS, v).apply()
 
-    /** 中文模式的键盘类型：0=全键盘 1=九键（T9） 2=明快（上下形取字） */
+    /**
+     * 当前键盘种类，取值是 [KeyboardKind.id]。
+     *
+     * 旧版本把「笔画键盘」存在 id=4 上，用户在那一版选过笔画的话，
+     * 升级后读到的会是一个已经不存在的键盘 —— 这里直接迁移成全键盘，
+     * 免得键盘选择面板里出现一个既没有勾、又切不走的幽灵项。
+     */
     var keyboardType: Int
-        get() = readInt(K_KEYBOARD_TYPE, 0)
-        set(v) = sp.edit().putInt(K_KEYBOARD_TYPE, v.coerceIn(0, 7)).apply()
+        get() {
+            val raw = readInt(K_KEYBOARD_TYPE, KeyboardKind.FULL.id)
+            return if (raw == KeyboardKind.LEGACY_STROKE_ID) {
+                KeyboardKind.FULL.id
+            } else {
+                raw.coerceIn(0, KeyboardKind.MAX_ID)
+            }
+        }
+        set(v) = sp.edit().putInt(K_KEYBOARD_TYPE, v.coerceIn(0, KeyboardKind.MAX_ID)).apply()
+
+    /** 同上，但直接给出枚举 */
+    var keyboardKind: KeyboardKind
+        get() = KeyboardKind.of(keyboardType)
+        set(v) {
+            keyboardType = v.id
+        }
 
     /** 兼容旧开关：勾上即键盘类型切到九键 */
     var nineKeyPinyin: Boolean
-        get() = keyboardType == 1
+        get() = keyboardType == KeyboardKind.NINE.id
         set(v) {
-            if (v) keyboardType = 1 else if (keyboardType == 1) keyboardType = 0
+            if (v) {
+                keyboardType = KeyboardKind.NINE.id
+            } else if (keyboardType == KeyboardKind.NINE.id) {
+                keyboardType = KeyboardKind.FULL.id
+            }
         }
+
+    /** 双拼方案，取值是 [org.YavSoft.UniBoard.predict.ShuangpinScheme.id] */
+    var shuangpinScheme: Int
+        get() = readInt("shuangpin_scheme", 0).coerceIn(0, 4)
+        set(v) = sp.edit().putInt("shuangpin_scheme", v.coerceIn(0, 4)).apply()
+
+    /** 日文：假名转汉字（关掉就只出假名与片假名） */
+    var kanaKanji: Boolean
+        get() = readBool("kana_kanji", true)
+        set(v) = sp.edit().putBoolean("kana_kanji", v).apply()
+
+    /** 日文：候选栏优先给片假名（外来语多的场合用） */
+    var kanaKatakanaFirst: Boolean
+        get() = readBool("kana_katakana_first", false)
+        set(v) = sp.edit().putBoolean("kana_katakana_first", v).apply()
+
+    /** 记录输入统计（字数、按键次数、常用词），全部只存在本机 */
+    var inputStats: Boolean
+        get() = readBool("input_stats", true)
+        set(v) = sp.edit().putBoolean("input_stats", v).apply()
 
     /** 中英混输：拼音候选里内联英文词，免去切换输入模式 */
     var mixedEnglish: Boolean
@@ -482,15 +526,9 @@ class Prefs(context: Context) {
         private const val K_MIXED_EN = "mixed_english"
         private const val K_GESTURE = "gesture_input"
 
-        /** 中文模式键盘类型 */
-        const val KB_FULL = 0
-        const val KB_NINE = 1
-        const val KB_MINGKWAI = 2
-        const val KB_SHUANGPIN = 3
-        const val KB_STROKE = 4
-        const val KB_T9_EN = 5
-        const val KB_KANA = 6
-        const val KB_ZHUYIN = 7
+        // 键盘种类的常量已经收敛到 KeyboardKind（core/KeyboardKind.kt）：
+        // 名字、id、顺序、分组都只有那一份，这里不再重复定义，避免又出现
+        // 「面板里有、设置页没有」这类三份清单互相打架的问题。
 
         const val MODE_UNICODE = 0
         const val MODE_PINYIN = 1

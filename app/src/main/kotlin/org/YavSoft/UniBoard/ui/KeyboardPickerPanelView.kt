@@ -18,6 +18,8 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import org.YavSoft.UniBoard.core.KeyboardGroup
+import org.YavSoft.UniBoard.core.KeyboardKind
 import org.YavSoft.UniBoard.core.Prefs
 import org.YavSoft.UniBoard.core.dpInt
 import org.YavSoft.UniBoard.ui.theme.KeyboardTheme
@@ -47,23 +49,17 @@ class KeyboardPickerPanelView(context: Context) : LinearLayout(context) {
 
     private val prefs = Prefs(context)
 
-    private val groups: List<Pair<String, List<Int>>> = listOf(
-        "中文输入" to listOf(
-            Prefs.KB_FULL, Prefs.KB_NINE, Prefs.KB_SHUANGPIN,
-            Prefs.KB_STROKE, Prefs.KB_MINGKWAI, Prefs.KB_ZHUYIN
-        ),
-        "其他语言" to listOf(Prefs.KB_T9_EN, Prefs.KB_KANA)
+    /** 分组顺序与内容都来自 [KeyboardKind]，不再在这里维护第二份键盘清单 */
+    private val groups: List<Pair<KeyboardGroup, List<KeyboardKind>>> = listOf(
+        KeyboardGroup.CHINESE to KeyboardKind.chinese,
+        KeyboardGroup.OTHER to KeyboardKind.others
     )
 
-    private fun nameOf(type: Int): String = when (type) {
-        Prefs.KB_NINE -> "九键（T9）"
-        Prefs.KB_SHUANGPIN -> "双拼（小鹤）"
-        Prefs.KB_STROKE -> "笔画输入"
-        Prefs.KB_MINGKWAI -> "明快键盘"
-        Prefs.KB_ZHUYIN -> "注音（ㄅㄆㄇㄈ）"
-        Prefs.KB_T9_EN -> "英文九键"
-        Prefs.KB_KANA -> "日文（罗马字）"
-        else -> "全键盘"
+    /** 双拼那一行要带上当前方案名，否则五个方案长得一样 */
+    private fun nameOf(kind: KeyboardKind): String = when (kind) {
+        KeyboardKind.SHUANGPIN ->
+            "${kind.label}（${org.YavSoft.UniBoard.predict.ShuangpinScheme.of(prefs.shuangpinScheme).short}）"
+        else -> kind.label
     }
 
     init {
@@ -83,9 +79,9 @@ class KeyboardPickerPanelView(context: Context) : LinearLayout(context) {
             setColor(theme.keyboardBackground)
         }
         addView(titleRow())
-        for ((group, types) in groups) {
-            addView(groupLabel(group))
-            for (type in types) addView(optionRow(type))
+        for ((group, kinds) in groups) {
+            addView(groupLabel(group.label))
+            for (kind in kinds) addView(optionRow(kind))
         }
     }
 
@@ -118,24 +114,31 @@ class KeyboardPickerPanelView(context: Context) : LinearLayout(context) {
         setPadding(context.dpInt(16f), context.dpInt(8f), context.dpInt(16f), context.dpInt(2f))
     }
 
-    private fun optionRow(type: Int): View {
-        val selected = prefs.keyboardType == type
+    private fun optionRow(kind: KeyboardKind): View {
+        val selected = prefs.keyboardKind == kind
         val row = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(context.dpInt(24f), context.dpInt(9f), context.dpInt(16f), context.dpInt(9f))
+            setPadding(context.dpInt(24f), context.dpInt(7f), context.dpInt(16f), context.dpInt(7f))
             isClickable = true
-            setOnClickListener { listener?.onPick(type) }
+            setOnClickListener { listener?.onPick(kind.id) }
         }
-        row.addView(TextView(context).apply {
-            text = nameOf(type)
+        val text = LinearLayout(context).apply { orientation = VERTICAL }
+        text.addView(TextView(context).apply {
+            this.text = nameOf(kind)
             textSize = 15f
             setTextColor(if (selected) theme.accent else theme.textPrimary)
             setTypeface(Typeface.DEFAULT, if (selected) Typeface.BOLD else Typeface.NORMAL)
-        }, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        })
+        text.addView(TextView(context).apply {
+            this.text = kind.description
+            textSize = 11f
+            setTextColor(theme.textSecondary)
+        })
+        row.addView(text, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         if (selected) {
             row.addView(TextView(context).apply {
-                text = "✓"
+                this.text = "✓"
                 textSize = 15f
                 setTextColor(theme.accent)
             })

@@ -36,8 +36,8 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
     val userLexicon = UserLexicon(appContext)
     /** 明快键盘的上下形索引 */
     val mingKwai = MingKwaiLexicon()
-    /** 笔画输入索引 */
-    val strokeLexicon = StrokeLexicon()
+    /** 日文：假名 → 汉字转换 */
+    val kanaKanji = KanaKanji()
     private val history = UserHistory(appContext)
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -65,8 +65,10 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
                 }
                 appContext.assets.open("lexicon/en_words.txt").bufferedReader().use { en.load(it) }
                 runCatching {
-                    appContext.assets.open("lexicon/stroke_index.txt").bufferedReader()
-                        .use { strokeLexicon.load(it) }
+                    // 日文词表比较大，用 gzip 存，解压后按行读
+                    java.util.zip.GZIPInputStream(
+                        appContext.assets.open("lexicon/ja_kanji.txt.gz")
+                    ).bufferedReader().use { kanaKanji.load(it) }
                 }
                 runCatching {
                     appContext.assets.open("lexicon/mingkwai_keys.txt").bufferedReader().use { keys ->
