@@ -131,6 +131,29 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
         history.record(word, prev)
     }
 
+    /** 日常高频词加成，按设置里的权重缩放（默认 20 → 与原来的 9.0 完全一致） */
+    private fun dailyBonus(word: String): Double =
+        DailyWords.bonus(word) * prefs.weightDaily / 20.0
+
+    /** 词库规模快照，给设置页展示 */
+    data class LexiconStats(
+        val zhGroups: Int,
+        val zhWords: Int,
+        val zhInitialsGroups: Int,
+        val enWords: Int,
+        val jaEntries: Int,
+        val mingKwaiShapes: Int
+    )
+
+    fun stats(): LexiconStats = LexiconStats(
+        zhGroups = zh.size,
+        zhWords = zh.wordCount,
+        zhInitialsGroups = zhInitials.size,
+        enWords = en.size,
+        jaEntries = kanaKanji.entryCount,
+        mingKwaiShapes = mingKwai.shapeKeys.size
+    )
+
     /** 用户手动加入词条 */
     fun addUserWord(word: String) {
         history.addWord(word)
@@ -155,9 +178,9 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
         fun offer(word: String, freq: Int, exact: Boolean, corrected: Boolean, bonus: Double = 0.0) {
             if (word.isEmpty()) return
             val user = history.freqOf(word)
-            var score = log10(freq.toDouble() + 10.0) * 10.0 + user * 22.0
-            if (exact) score += 26.0
-            score += word.length * 1.5 + bonus + DailyWords.bonus(word)
+            var score = log10(freq.toDouble() + 10.0) * 10.0 + user * prefs.weightUser
+            if (exact) score += prefs.weightExact
+            score += word.length * (prefs.weightLength / 10.0) + bonus + dailyBonus(word)
             val old = pool[word]
             if (old == null || old.score < score) {
                 pool[word] = Candidate(
@@ -186,16 +209,19 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
 
         // 3) 简拼：精确 + 前缀。「zg」-> 中国；「z」-> 这个/自己/中国…
         if (prefs.initialsEnabled && pool.size < limit) {
-            zhInitials.exact(py).forEach { offer(it.text, it.freq, false, false, 6.0) }
+            zhInitials.exact(py).forEach {
+                offer(it.text, it.freq, false, false, prefs.weightInitials.toDouble())
+            }
             zhInitials.prefix(py, maxKeys = 60, perKey = 2)
                 .forEach { offer(it.text, it.freq, false, false, -4.0) }
         }
 
         // 3.5) 中英混输：输入的拼音串恰好也是英文词前缀时，内联少量英文候选
-        if (prefs.mixedEnglish && py.length >= 2 && pool.size < limit) {
+        val mixedBudget = prefs.mixedEnglishCount
+        if (prefs.mixedEnglish && mixedBudget > 0 && py.length >= 2 && pool.size < limit) {
             var added = 0
             en.prefix(py, 12).forEach { w ->
-                if (added >= 3) return@forEach
+                if (added >= mixedBudget) return@forEach
                 if (pool.containsKey(w.text)) return@forEach
                 pool[w.text] = Candidate(
                     text = w.text,
@@ -332,9 +358,9 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
         fun offer(word: String, freq: Int, exact: Boolean, bonus: Double = 0.0, pinyin: String? = null) {
             if (word.isEmpty()) return
             val user = history.freqOf(word)
-            var score = log10(freq.toDouble() + 10.0) * 10.0 + user * 22.0
-            if (exact) score += 22.0
-            score += word.length * 1.5 + bonus + DailyWords.bonus(word)
+            var score = log10(freq.toDouble() + 10.0) * 10.0 + user * prefs.weightUser
+            if (exact) score += prefs.weightExact - 4
+            score += word.length * (prefs.weightLength / 10.0) + bonus + dailyBonus(word)
             val old = pool[word]
             if (old == null || old.score < score) {
                 pool[word] = Candidate(
@@ -409,8 +435,8 @@ class PredictionEngine(context: Context, private val prefs: Prefs) {
 
         fun offer(word: String, freq: Int, exact: Boolean, corrected: Boolean) {
             val user = history.freqOf(word)
-            var score = log10(freq.toDouble() + 10.0) * 10.0 + user * 25.0
-            if (exact) score += 30.0
+            var score = log10(freq.toDouble() + 10.0) * 10.0 + user * (prefs.weightUser + 3)
+            if (exact) score += prefs.weightExact + 4
             val label = if (capitalize) word.replaceFirstChar { it.uppercaseChar() } else word
             val old = pool[word]
             if (old == null || old.score < score) {

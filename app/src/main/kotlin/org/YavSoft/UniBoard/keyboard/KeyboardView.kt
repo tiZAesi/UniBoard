@@ -159,25 +159,40 @@ class KeyboardView @JvmOverloads constructor(
         animateLayoutIn()
     }
 
-    /** 切换布局时，各行自上而下依次滑入，避免整块键盘硬闪 */
+    /**
+     * 切换布局时的入场：整块淡入 + 各行自上而下依次「铺」到位。
+     *
+     * 只做整块淡入会显得平；只做逐行位移又会因为行数不同而节奏不一。
+     * 两者叠起来（视图 alpha 170ms，行位移 220ms、靠下的行晚到）更像实体键盘，
+     * 而且 [prefs] 关掉按键动画时完全不介入。
+     */
     private fun animateLayoutIn() {
         layoutAnimator?.cancel()
         if (!prefs.keyAnimation) {
             layoutProgress = 1f
+            alpha = 1f
+            translationY = 0f
             invalidate()
             return
         }
-        layoutProgress = 1f
-        // 整体淡入，比逐行位移更顺滑，也不会在频繁切换时闪
-        alpha = 0.82f
-        translationY = context.dp(3f)
+        layoutProgress = 0f
+        alpha = 0.62f
+        translationY = 0f
         animate().cancel()
         animate()
             .alpha(1f)
-            .translationY(0f)
-            .setDuration(130)
-            .setInterpolator(DecelerateInterpolator(1.4f))
+            .setDuration(170)
+            .setInterpolator(DecelerateInterpolator(1.5f))
             .start()
+        layoutAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 220
+            interpolator = DecelerateInterpolator(1.3f)
+            addUpdateListener {
+                layoutProgress = it.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
     }
 
     fun currentLayoutId(): String? = layoutRef?.id
@@ -235,9 +250,23 @@ class KeyboardView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         val p = pressed
+        val animating = layoutProgress < 1f
+        val rows = if (hits.isEmpty()) 1 else hits.maxOf { it.rowIndex } + 1
         for (hit in hits) {
             val press = if (p != null && p.hit === hit) p.progress else 0f
+            if (!animating) {
+                drawKey(canvas, hit, press)
+                continue
+            }
+            // 行进度：底下的行分到的入场时间更晚，形成自上而下的次序感
+            val span = 0.55f
+            val rowP = ((layoutProgress - hit.rowIndex / rows.toFloat() * (1f - span)) / span)
+                .coerceIn(0f, 1f)
+            if (rowP <= 0.001f) continue
+            canvas.save()
+            canvas.translate(0f, (1f - rowP) * context.dp(7f))
             drawKey(canvas, hit, press)
+            canvas.restore()
         }
         if (p != null && p.popupShown) drawPopup(canvas, p)
     }
@@ -245,7 +274,7 @@ class KeyboardView @JvmOverloads constructor(
     private fun drawKey(canvas: Canvas, hit: Hit, press: Float) {
         val key = hit.key
         val rect = hit.rect
-        val scale = 1f - 0.045f * press.coerceIn(0f, 1.2f)
+        val scale = 1f - 0.05f * press.coerceIn(0f, 1.2f)
         canvas.save()
         canvas.scale(scale, scale, rect.centerX(), rect.centerY())
         val radius = context.dp(theme.keyRadiusDp)
@@ -579,8 +608,8 @@ class KeyboardView @JvmOverloads constructor(
             return
         }
         pressAnimator = ValueAnimator.ofFloat(p.progress, 0f).apply {
-            duration = 115
-            interpolator = OvershootInterpolator(1.9f)
+            duration = 130
+            interpolator = OvershootInterpolator(1.25f)
             addUpdateListener {
                 p.progress = it.animatedValue as Float
                 if (pressed === p) invalidate()
@@ -679,8 +708,9 @@ class KeyboardView @JvmOverloads constructor(
             return
         }
         pressAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 90
-            interpolator = OvershootInterpolator(1.6f)
+            duration = 70
+            // 按下去要「跟手」：短、纯减速，不要过冲（过冲看起来像按键在弹开）
+            interpolator = DecelerateInterpolator(1.8f)
             addUpdateListener {
                 p.progress = it.animatedValue as Float
                 if (pressed === p) invalidate()

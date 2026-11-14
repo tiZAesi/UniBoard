@@ -24,6 +24,8 @@ class UniBoardApp : Application() {
     override fun onCreate() {
         super.onCreate()
         installCrashCatcher()
+        // 「跟随系统 / 浅色 / 深色」要同时落到界面与键盘，必须早于任何 Activity 创建
+        org.YavSoft.UniBoard.ui.theme.AppTheme.apply(this)
         if (Prefs(this).dynamicColor) {
             DynamicColors.applyToActivitiesIfAvailable(this)
         }

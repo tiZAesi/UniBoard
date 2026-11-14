@@ -44,7 +44,7 @@ class AiLexiconActivity : SettingsBase() {
         status = TextView(this).apply {
             text = if (org.YavSoft.UniBoard.ai.AiClient.isConfigured(prefs)) "" else "请先在「AI 助手」中启用 AI 并配置接口（本地模型可留空密钥）。"
             textSize = 13f
-            setTextColor(0xFF757575.toInt())
+            setTextColor(colorHint())
             setPadding(dpInt(16f), dpInt(10f), dpInt(16f), dpInt(6f))
         }
         container.addView(status)
@@ -56,7 +56,7 @@ class AiLexiconActivity : SettingsBase() {
         val empty = TextView(this).apply {
             text = "暂无结果。"
             textSize = 13f
-            setTextColor(0xFF757575.toInt())
+            setTextColor(colorHint())
             setPadding(dpInt(16f), dpInt(14f), dpInt(16f), dpInt(16f))
         }
         resultBox.addView(empty)
@@ -139,7 +139,7 @@ class AiLexiconActivity : SettingsBase() {
                     append("   ").append(e.weight)
                 }
                 textSize = 15f
-                setTextColor(0xFF212121.toInt())
+                setTextColor(colorTextPrimary())
                 setPadding(dpInt(12f), dpInt(6f), dpInt(16f), dpInt(6f))
             }
             resultBox.addView(box, LinearLayout.LayoutParams(

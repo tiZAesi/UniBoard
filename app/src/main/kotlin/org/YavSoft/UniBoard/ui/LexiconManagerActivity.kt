@@ -29,7 +29,7 @@ class LexiconManagerActivity : SettingsBase() {
         title("管理词典")
         summary = TextView(this).apply {
             textSize = 13f
-            setTextColor(0xFF757575.toInt())
+            setTextColor(colorHint())
             setPadding(dpInt(16f), dpInt(14f), dpInt(16f), dpInt(6f))
         }
 
@@ -73,7 +73,7 @@ class LexiconManagerActivity : SettingsBase() {
             listBox.addView(TextView(this).apply {
                 text = if (all.isEmpty()) "暂无词条。可通过「AI 生成词条」生成，或从文件导入。" else "未找到匹配的词条。"
                 textSize = 13f
-                setTextColor(0xFF757575.toInt())
+                setTextColor(colorHint())
                 setPadding(dpInt(16f), dpInt(16f), dpInt(16f), dpInt(18f))
             })
             return
@@ -89,7 +89,7 @@ class LexiconManagerActivity : SettingsBase() {
             texts.addView(TextView(this).apply {
                 text = e.word
                 textSize = 16f
-                setTextColor(0xFF212121.toInt())
+                setTextColor(colorTextPrimary())
             })
             val meta = buildString {
                 if (e.pinyin.isNotEmpty()) append(e.pinyin)
@@ -100,14 +100,14 @@ class LexiconManagerActivity : SettingsBase() {
             texts.addView(TextView(this).apply {
                 text = meta
                 textSize = 12f
-                setTextColor(0xFF757575.toInt())
+                setTextColor(colorHint())
             })
             row.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
             row.addView(TextView(this).apply {
                 text = "删除"
                 textSize = 14f
-                setTextColor(0xFFD32F2F.toInt())
+                setTextColor(colorDanger())
                 setPadding(dpInt(10f), dpInt(8f), dpInt(10f), dpInt(8f))
                 setOnClickListener {
                     confirm("删除词条「${e.word}」？") {
@@ -125,7 +125,7 @@ class LexiconManagerActivity : SettingsBase() {
             listBox.addView(TextView(this).apply {
                 text = "仅显示前 200 条，可使用搜索缩小范围。"
                 textSize = 12f
-                setTextColor(0xFF9E9E9E.toInt())
+                setTextColor(colorHint())
                 setPadding(dpInt(16f), dpInt(10f), dpInt(16f), dpInt(14f))
             })
         }

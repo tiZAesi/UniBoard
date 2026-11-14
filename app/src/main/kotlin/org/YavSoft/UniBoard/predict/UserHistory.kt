@@ -91,6 +91,35 @@ class UserHistory(context: Context) {
     /** 已学习的词条数量 */
     fun size(): Int = unigram.size
 
+    /**
+     * 词频排行（次数降序）。
+     *
+     * 给设置页的「学习记录」用：只看次数不看时间，一眼能看出哪些词被学得太重。
+     */
+    fun topWords(limit: Int = 30): List<Pair<String, Int>> =
+        unigram.entries.sortedByDescending { it.value }.take(limit).map { it.key to it.value }
+
+    /**
+     * 上下文二元组（前一个词 → 后一个词，次数降序）。
+     *
+     * 「联想词」就是靠这张表，直接在界面上列出来，用户才能判断联想准不准。
+     */
+    fun topPairs(limit: Int = 20): List<Triple<String, String, Int>> {
+        val out = ArrayList<Triple<String, String, Int>>(limit)
+        for ((prev, m) in bigram) {
+            for ((next, c) in m) out.add(Triple(prev, next, c))
+        }
+        out.sortByDescending { it.third }
+        return if (out.size > limit) out.subList(0, limit) else out
+    }
+
+    /** 只清空上下文（保留词频），联想不听话时用 */
+    fun clearBigrams() {
+        bigram.clear()
+        dirty = true
+        saveBlocking()
+    }
+
     fun clear() {
         unigram.clear()
         bigram.clear()

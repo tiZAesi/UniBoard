@@ -80,6 +80,27 @@ class SettingsActivity : SettingsBase() {
         section("主题模式")
         val c1 = card()
         themeModeRow(c1)
+        c1.addView(TextView(this).apply {
+            text = "「跟随系统」时，键盘按系统的深色 / 浅色自动换配色；" +
+                "系统切主题后键盘会在下次弹出时跟上，不需要重装或重启。"
+            textSize = 12f
+            setTextColor(colorHint())
+            setPadding(dpInt(16f), 0, dpInt(16f), dpInt(12f))
+        })
+        section("深色外观")
+        val c1b = card()
+        toggle(c1b, "深色用纯黑底", "OLED 屏更省电，也最接近系统深色；键帽仍保留层次", prefs.pureBlackDark) {
+            prefs.pureBlackDark = it
+            KeyboardThemes.invalidate()
+            recreate()
+        }
+        c1b.addView(TextView(this).apply {
+            text = "深色模式强制「深底 + 浅字」。如果某台机器取色异常导致底色偏浅，" +
+                "键盘会自动回落到内置的深色调色板，不会再出现看不清的情况。"
+            textSize = 12f
+            setTextColor(colorHint())
+            setPadding(dpInt(16f), 0, dpInt(16f), dpInt(12f))
+        })
         section("主题色")
         val c2 = card()
         colorPalette(c2, prefs.accentColor) {
@@ -117,7 +138,7 @@ class SettingsActivity : SettingsBase() {
         val fontStatus = TextView(this).apply {
             text = fontResolver.builtinStatus()
             textSize = 12f
-            setTextColor(0xFF757575.toInt())
+            setTextColor(colorHint())
             setPadding(dpInt(16f), dpInt(12f), dpInt(16f), dpInt(4f))
         }
         c4.addView(fontStatus)
@@ -155,7 +176,8 @@ class SettingsActivity : SettingsBase() {
         val names = listOf("跟随系统", "浅色", "深色")
         choice(parent, names, prefs.themeMode.coerceIn(0, 2)) { index ->
             prefs.themeMode = index
-            KeyboardThemes.invalidate()
+            // 一次改动要同时作用于设置页（AppCompat 日夜模式）与键盘配色
+            applyThemeMode()
             recreate()
         }
     }
@@ -354,11 +376,59 @@ class SettingsActivity : SettingsBase() {
             textSize = 12f
             setPadding(dpInt(16f), 0, dpInt(16f), dpInt(12f))
         })
+        section("候选权重")
+        val cw = card()
+        cw.addView(TextView(this).apply {
+            text = "候选排序 = 词库词频 + 本机学习 + 命中方式加成。这里只调「加成」，" +
+                "默认值就是原来的内置权重，不动它排序行为完全不变。"
+            textSize = 12f
+            setTextColor(colorHint())
+            setPadding(dpInt(16f), dpInt(12f), dpInt(16f), dpInt(4f))
+        })
+        slider(
+            cw, "整词命中加成", 0f, 60f, 2f, prefs.weightExact.toFloat(),
+            display = { it.toInt().toString() + " 分" }
+        ) { prefs.weightExact = it.toInt() }
+        slider(
+            cw, "本机词频权重", 0f, 80f, 2f, prefs.weightUser.toFloat(),
+            display = { it.toInt().toString() + "×" }
+        ) { prefs.weightUser = it.toInt() }
+        slider(
+            cw, "长词加成", 0f, 50f, 5f, prefs.weightLength.toFloat(),
+            display = { String.format(java.util.Locale.US, "%.1f 分/字", it / 10f) }
+        ) { prefs.weightLength = it.toInt() }
+        slider(
+            cw, "日常词加成", 0f, 60f, 5f, prefs.weightDaily.toFloat(),
+            display = { it.toInt().toString() + " 分" }
+        ) { prefs.weightDaily = it.toInt() }
+        slider(
+            cw, "简拼加成", 0f, 30f, 2f, prefs.weightInitials.toFloat(),
+            display = { it.toInt().toString() + " 分" }
+        ) { prefs.weightInitials = it.toInt() }
+        slider(
+            cw, "中英混输候选数", 0f, 8f, 1f, prefs.mixedEnglishCount.toFloat(),
+            display = { if (it.toInt() == 0) "关闭" else it.toInt().toString() + " 个" }
+        ) { prefs.mixedEnglishCount = it.toInt() }
+        action(cw, "恢复默认权重") {
+            prefs.resetCandidateWeights()
+            toast("权重已恢复默认")
+            recreate()
+        }
+        cw.addView(TextView(this).apply {
+            text = "调大「本机词频权重」会更偏向你常打的词；调小则更贴近通用词频。" +
+                "觉得候选总被生僻词挤掉，就把「整词命中加成」调高、把「长词加成」调低试试。"
+            textSize = 12f
+            setTextColor(colorHint())
+            setPadding(dpInt(16f), dpInt(6f), dpInt(16f), dpInt(12f))
+        })
+
         section("关于词库")
         val c3 = card()
         c3.addView(TextView(this).apply {
-            text = "内置中文、简拼与英文词库；具体数量随版本变化，可在「词典与数据」页查看。"
+            text = "中文全拼、简拼、英文、明快字形与日文词表都随应用离线打包，" +
+                "输入过程不联网；具体规模在「学习记录与数据」页可以看到。"
             textSize = 13f
+            setTextColor(colorHint())
             setPadding(dpInt(16f), dpInt(12f), dpInt(16f), dpInt(12f))
         })
     }
@@ -492,7 +562,7 @@ class SettingsActivity : SettingsBase() {
         val info = TextView(this).apply {
             text = "用户词典当前 ${lex.size} 条。AI 生成与导入的词条会进入此处，并在候选中优先出现。"
             textSize = 13f
-            setTextColor(0xFF757575.toInt())
+            setTextColor(colorHint())
             setPadding(dpInt(16f), dpInt(14f), dpInt(16f), dpInt(6f))
         }
 
@@ -574,19 +644,71 @@ class SettingsActivity : SettingsBase() {
     /** 学习记录与数据文件 */
     private fun buildDataInfo() {
         title("学习记录与数据")
+        subtitle("这里能看到输入法到底学了什么、词库有多大，以及一键清理的入口。")
+
         val history = org.YavSoft.UniBoard.predict.UserHistory(this).apply { load() }
         val lex = org.YavSoft.UniBoard.predict.UserLexicon(this).apply { load() }
         val phrases = org.YavSoft.UniBoard.clip.QuickPhrases(this)
         val clips = org.YavSoft.UniBoard.clip.ClipStore(this)
+        val log = org.YavSoft.UniBoard.core.LearningLog(this)
 
+        section("概览")
         val box = card()
         box.addView(TextView(this).apply {
             text = "已学习词频 ${history.size()} 条 · 用户词条 ${lex.size} 条 · " +
-                "常用语 ${phrases.list().size} 条 · 剪贴板历史 ${clips.recent().size} 条"
+                "常用语 ${phrases.list().size} 条 · 剪贴板历史 ${clips.recent().size} 条 · " +
+                "学习日志 ${log.size} 条"
             textSize = 13f
-            setTextColor(0xFF757575.toInt())
+            setTextColor(colorHint())
             setPadding(dpInt(16f), dpInt(12f), dpInt(16f), dpInt(12f))
         })
+
+        section("学习记录日志")
+        val logCard = card()
+        toggle(logCard, "记录学习日志", "每次上屏、自动收录都会留一条，最多保存最近 500 条", prefs.learningLog) {
+            prefs.learningLog = it
+        }
+        val logView = TextView(this).apply {
+            textSize = 12f
+            setTextColor(colorHint())
+            setPadding(dpInt(16f), dpInt(8f), dpInt(16f), dpInt(8f))
+            typeface = android.graphics.Typeface.MONOSPACE
+            text = learningLogText(log, history)
+        }
+        val logScroll = android.widget.ScrollView(this).apply {
+            isFillViewport = false
+            addView(logView)
+        }
+        logCard.addView(
+            logScroll,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpInt(220f)
+            )
+        )
+        action(logCard, "刷新列表") { recreate() }
+        action(logCard, "导出日志到外部目录") {
+            runCatching {
+                val target = java.io.File(getExternalFilesDir(null), "UniBoard数据").apply { mkdirs() }
+                val f = java.io.File(target, "learning_log.txt")
+                f.writeText(log.exportText())
+                toast("已导出：" + f.absolutePath)
+            }.onFailure { toast("导出失败：" + (it.message ?: "")) }
+        }
+        action(logCard, "清空上屏日志") {
+            confirm("清空学习日志？（不影响已学习的词频）") {
+                log.clear()
+                toast("日志已清空")
+                recreate()
+            }
+        }
+        action(logCard, "只清空联想关系") {
+            confirm("清空「上一个词 → 下一个词」的联想统计？词频会保留。") {
+                history.clearBigrams()
+                toast("联想关系已清空")
+                recreate()
+            }
+        }
 
         section("输入统计")
         val st = org.YavSoft.UniBoard.core.InputStats(this)
@@ -596,13 +718,13 @@ class SettingsActivity : SettingsBase() {
             text = "累计上屏 ${snap.totalChars} 字 · 今天 ${snap.todayChars} 字 · " +
                 "按键 ${snap.keys} 次 · 上屏 ${snap.commits} 次"
             textSize = 13f
-            setTextColor(0xFF757575.toInt())
+            setTextColor(colorHint())
             setPadding(dpInt(16f), dpInt(12f), dpInt(16f), dpInt(6f))
         })
         statsCard.addView(TextView(this).apply {
             text = "统计只写在本机应用私有目录，不联网、不上报。"
             textSize = 12f
-            setTextColor(0xFF757575.toInt())
+            setTextColor(colorHint())
             setPadding(dpInt(16f), 0, dpInt(16f), dpInt(10f))
         })
         toggle(statsCard, "记录输入统计", "关掉后不再计数，已有数据保留", prefs.inputStats) {
@@ -616,13 +738,25 @@ class SettingsActivity : SettingsBase() {
             }
         }
 
+        section("词库规模")
+        val scaleCard = card()
+        val scaleView = TextView(this).apply {
+            text = "统计中…"
+            textSize = 12f
+            setTextColor(colorHint())
+            setPadding(dpInt(16f), dpInt(10f), dpInt(16f), dpInt(10f))
+            typeface = android.graphics.Typeface.MONOSPACE
+        }
+        scaleCard.addView(scaleView)
+        loadLexiconScale(scaleView)
+
         section("数据文件")
         val files = card()
         files.addView(TextView(this).apply {
             text = "文件都在应用私有目录，卸载即删。点下面「导出数据副本」会把它们复制到" +
-                " Android/data/${packageName}/files/UniBoard数据，文件管理器可以看到。"
+                " Android/data/$packageName/files/UniBoard数据，文件管理器可以看到。"
             textSize = 12f
-            setTextColor(0xFF757575.toInt())
+            setTextColor(colorHint())
             setPadding(dpInt(16f), dpInt(10f), dpInt(16f), dpInt(10f))
         })
         action(files, "导出数据副本到外部目录") { exportDataCopy() }
@@ -639,9 +773,79 @@ class SettingsActivity : SettingsBase() {
 
         section("物理键盘")
         val kb = card()
-        toggle(kb, "外接键盘固定英文直出", "接蓝牙/USB 键盘时不进入拼音组合，直接上屏", prefs.hardwareDirectLatin) {
+        toggle(kb, "外接键盘固定英文直出", "接蓝牙 / USB 键盘时不进入拼音组合，直接上屏", prefs.hardwareDirectLatin) {
             prefs.hardwareDirectLatin = it
         }
+    }
+
+    /** 学习日志的正文：最近上屏 + 高频词 + 联想关系，三块拼在一起 */
+    private fun learningLogText(
+        log: org.YavSoft.UniBoard.core.LearningLog,
+        history: org.YavSoft.UniBoard.predict.UserHistory
+    ): String {
+        val sb = StringBuilder(2048)
+        val recent = log.recent(40)
+        sb.append("最近上屏（新→旧）\n")
+        if (recent.isEmpty()) {
+            sb.append("  还没有记录。打几个字就会出现在这里。\n")
+        } else {
+            for (e in recent) {
+                sb.append("  ").append(e.timeLabel()).append("  ")
+                    .append(e.kindLabel).append("  ").append(e.text)
+                if (e.extra.isNotEmpty()) sb.append("  （").append(e.extra).append("）")
+                sb.append('\n')
+            }
+        }
+        sb.append('\n').append("词频排行\n")
+        val top = history.topWords(15)
+        if (top.isEmpty()) {
+            sb.append("  还没有学到的词。\n")
+        } else {
+            sb.append("  ").append(top.joinToString(" · ") { "${it.first} ${it.second}" }).append('\n')
+        }
+        sb.append('\n').append("联想关系（前一个词 → 后一个词）\n")
+        val pairs = history.topPairs(10)
+        if (pairs.isEmpty()) {
+            sb.append("  还没有上下文记录。\n")
+        } else {
+            for (p in pairs) {
+                sb.append("  ").append(p.first).append(" → ").append(p.second)
+                    .append("  ").append(p.third).append(" 次\n")
+            }
+        }
+        return sb.toString()
+    }
+
+    /** 词库规模：读 assets 数行数，放后台线程，避免卡住设置页 */
+    private fun loadLexiconScale(target: TextView) {
+        Thread {
+            fun lines(open: () -> java.io.InputStream): Int = runCatching {
+                open().bufferedReader().use { r ->
+                    var n = 0
+                    while (r.readLine() != null) n++
+                    n
+                }
+            }.getOrDefault(0)
+
+            val zhPinyin = lines { assets.open("lexicon/zh_pinyin.txt") }
+            val zhInitials = lines { assets.open("lexicon/zh_initials.txt") }
+            val en = lines { assets.open("lexicon/en_words.txt") }
+            val shapes = lines { assets.open("lexicon/mingkwai_keys.txt") }
+            val ja = lines {
+                java.util.zip.GZIPInputStream(assets.open("lexicon/ja_kanji.lex"))
+            }
+            val text = buildString {
+                append("中文全拼索引  ").append(zhPinyin).append(" 组\n")
+                append("中文简拼索引  ").append(zhInitials).append(" 组\n")
+                append("英文词条      ").append(en).append('\n')
+                append("明快字根      ").append(shapes).append(" 键\n")
+                append("日文读音      ").append(ja).append(" 行\n")
+                append("\n词库随包分发，离线可用。")
+            }
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) target.text = text
+            }
+        }.start()
     }
 
     /** 把数据文件复制到外部私有目录，方便文件管理器查看 */

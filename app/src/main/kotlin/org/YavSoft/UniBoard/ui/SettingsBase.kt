@@ -150,6 +150,35 @@ abstract class SettingsBase : AppCompatActivity() {
 
     protected fun colorOf(attr: Int): Int = colorText()
 
+    /**
+     * 说明文字的灰色。
+     *
+     * 之前各页直接写死 0xFF757575，深色主题下这段灰字几乎贴在深底上看不见；
+     * 统一改走主题的 onSurfaceVariant，浅底深底都可读。
+     */
+    protected fun colorHint(): Int = colorTextDim()
+
+    /** 正文主色（深底白字 / 浅底黑字，跟着主题走） */
+    protected fun colorTextPrimary(): Int = colorText()
+
+    /** 卡片与输入框底色 */
+    protected fun colorSurfaceCard(): Int = colorSurface()
+
+    /** 分割线 / 边框 */
+    protected fun colorDividerLine(): Int = colorDivider()
+
+    /** 强调色（链接、跳转按钮） */
+    protected fun colorAccentText(): Int = colorAccent()
+
+    /** 危险操作（删除、清空） */
+    protected fun colorDanger(): Int =
+        attr(com.google.android.material.R.attr.colorError, 0xFFB3261E.toInt())
+
+    /** 列表行按下态：在卡片底色上叠一层极淡的正文色 */
+    protected fun colorRowPressed(): Int = androidx.core.graphics.ColorUtils.blendARGB(
+        colorSurface(), colorText(), 0.07f
+    )
+
     /** 首个 title 作为标题栏文字 */
     protected fun title(text: String, size: Float = 24f) {
         if (!titleSet) {
@@ -444,6 +473,11 @@ abstract class SettingsBase : AppCompatActivity() {
             .setPositiveButton("确定") { _, _ -> onYes() }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    /** 主题模式改动后调用：应用日夜模式 + 清键盘配色缓存 */
+    protected fun applyThemeMode() {
+        org.YavSoft.UniBoard.ui.theme.AppTheme.apply(this)
     }
 
     protected fun toast(msg: String) {

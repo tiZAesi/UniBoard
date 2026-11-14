@@ -28,14 +28,21 @@ import org.YavSoft.UniBoard.ui.theme.KeyboardThemes
 /**
  * 键盘选择面板。
  *
- * 只列键盘本身，不再写一长串说明：按「中文输入 / 其他语言」分组，
- * 每行一个键盘名，当前项右侧打勾。面板高度按内容自适应，
- * 但最多显示到键盘高度的量级，避免遮住整个屏幕。
+ * 按「中文输入 / 其它语言」分组，每行一个键盘名 + 一行说明，当前项右侧打勾。
+ *
+ * 双拼那一行支持**长按切换方案**：长按后本面板原地换成五个方案的选择列表
+ * （小鹤 / 自然码 / 微软 / 智能 ABC / 拼音加加），点一下即可换，标题栏有「返回」。
+ * 不另起弹窗，是因为输入法窗口里弹 Dialog 容易和键盘抢焦点、在部分 ROM 上还会露出白底。
  */
 class KeyboardPickerPanelView(context: Context) : LinearLayout(context) {
 
     interface Listener {
+        /** 选中某个键盘 */
         fun onPick(type: Int)
+
+        /** 选中某个双拼方案（[org.YavSoft.UniBoard.predict.ShuangpinScheme.id]） */
+        fun onPickScheme(schemeId: Int) {}
+
         fun onClose()
     }
 
@@ -48,6 +55,9 @@ class KeyboardPickerPanelView(context: Context) : LinearLayout(context) {
         }
 
     private val prefs = Prefs(context)
+
+    /** 是否正在显示「双拼方案」子列表 */
+    private var showingSchemes = false
 
     /** 分组顺序与内容都来自 [KeyboardKind]，不再在这里维护第二份键盘清单 */
     private val groups: List<Pair<KeyboardGroup, List<KeyboardKind>>> = listOf(
@@ -79,6 +89,13 @@ class KeyboardPickerPanelView(context: Context) : LinearLayout(context) {
             setColor(theme.keyboardBackground)
         }
         addView(titleRow())
+        if (showingSchemes) {
+            addView(groupLabel("双拼方案（点一下即生效）"))
+            for (scheme in org.YavSoft.UniBoard.predict.ShuangpinScheme.ALL) {
+                addView(schemeRow(scheme))
+            }
+            return
+        }
         for ((group, kinds) in groups) {
             addView(groupLabel(group.label))
             for (kind in kinds) addView(optionRow(kind))
@@ -91,8 +108,22 @@ class KeyboardPickerPanelView(context: Context) : LinearLayout(context) {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(context.dpInt(16f), context.dpInt(2f), context.dpInt(12f), context.dpInt(2f))
         }
+        if (showingSchemes) {
+            row.addView(TextView(context).apply {
+                text = "‹ 返回"
+                textSize = 13f
+                setTextColor(theme.accent)
+                setPadding(0, context.dpInt(4f), context.dpInt(10f), context.dpInt(4f))
+                isClickable = true
+                setOnClickListener {
+                    showingSchemes = false
+                    rebuild()
+                    requestLayout()
+                }
+            })
+        }
         row.addView(TextView(context).apply {
-            text = "选择键盘"
+            text = if (showingSchemes) "选择双拼方案" else "选择键盘"
             textSize = 13f
             setTypeface(Typeface.DEFAULT, Typeface.BOLD)
             setTextColor(theme.textSecondary)
@@ -102,8 +133,35 @@ class KeyboardPickerPanelView(context: Context) : LinearLayout(context) {
             textSize = 13f
             setTextColor(theme.accent)
             setPadding(context.dpInt(10f), context.dpInt(4f), context.dpInt(4f), context.dpInt(4f))
+            isClickable = true
             setOnClickListener { listener?.onClose() }
         })
+        return row
+    }
+
+    /** 双拼方案行：当前方案打勾 */
+    private fun schemeRow(scheme: org.YavSoft.UniBoard.predict.ShuangpinScheme): View {
+        val selected = prefs.shuangpinScheme == scheme.id
+        val row = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(context.dpInt(24f), context.dpInt(9f), context.dpInt(16f), context.dpInt(9f))
+            isClickable = true
+            setOnClickListener { listener?.onPickScheme(scheme.id) }
+        }
+        row.addView(TextView(context).apply {
+            text = scheme.label
+            textSize = 15f
+            setTextColor(if (selected) theme.accent else theme.textPrimary)
+            setTypeface(Typeface.DEFAULT, if (selected) Typeface.BOLD else Typeface.NORMAL)
+        }, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        if (selected) {
+            row.addView(TextView(context).apply {
+                text = "✓"
+                textSize = 15f
+                setTextColor(theme.accent)
+            })
+        }
         return row
     }
 
@@ -122,6 +180,16 @@ class KeyboardPickerPanelView(context: Context) : LinearLayout(context) {
             setPadding(context.dpInt(24f), context.dpInt(7f), context.dpInt(16f), context.dpInt(7f))
             isClickable = true
             setOnClickListener { listener?.onPick(kind.id) }
+            if (kind == KeyboardKind.SHUANGPIN) {
+                // 长按进方案列表：5 个方案挤不进面板主列表，但切换又必须够快
+                isLongClickable = true
+                setOnLongClickListener {
+                    showingSchemes = true
+                    rebuild()
+                    requestLayout()
+                    true
+                }
+            }
         }
         val text = LinearLayout(context).apply { orientation = VERTICAL }
         text.addView(TextView(context).apply {
@@ -131,7 +199,11 @@ class KeyboardPickerPanelView(context: Context) : LinearLayout(context) {
             setTypeface(Typeface.DEFAULT, if (selected) Typeface.BOLD else Typeface.NORMAL)
         })
         text.addView(TextView(context).apply {
-            this.text = kind.description
+            this.text = if (kind == KeyboardKind.SHUANGPIN) {
+                kind.description + " · 长按切换方案"
+            } else {
+                kind.description
+            }
             textSize = 11f
             setTextColor(theme.textSecondary)
         })
@@ -146,5 +218,9 @@ class KeyboardPickerPanelView(context: Context) : LinearLayout(context) {
         return row
     }
 
-    fun refresh() = rebuild()
+    /** 外部每次打开面板时调用：回到键盘主列表，不保留上次的方案子列表 */
+    fun refresh() {
+        showingSchemes = false
+        rebuild()
+    }
 }

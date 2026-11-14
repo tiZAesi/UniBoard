@@ -31,7 +31,13 @@ class PinyinLexicon {
     private var t9Sigs: Array<String> = emptyArray()
     private var t9Order: IntArray = IntArray(0)
 
+    /** 拼音索引组数（一行一组） */
     val size: Int get() = keys.size
+
+    /** 词条总数（所有组里的词加起来），给设置页显示词库规模 */
+    var wordCount: Int = 0
+        private set
+
     val isLoaded: Boolean get() = keys.isNotEmpty()
 
     fun load(reader: BufferedReader) {
@@ -65,6 +71,7 @@ class PinyinLexicon {
         }
         keys = keyList.toTypedArray()
         buckets = bucketList.toTypedArray()
+        wordCount = bucketList.sumOf { it.size }
 
         // 九键索引：每个拼音串折算成数字签名，再按签名排序，供前缀二分查找
         t9Sigs = Array(keys.size) { T9.digits(keys[it]) }

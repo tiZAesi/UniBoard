@@ -15,8 +15,11 @@
 
 package org.YavSoft.UniBoard.core
 
+import android.app.UiModeManager
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.res.Configuration
+import android.os.Build
 
 /**
  * 全局设置存储。所有读写都经过这里，避免散落的 key 常量。
@@ -315,6 +318,99 @@ class Prefs(context: Context) {
     var inputStats: Boolean
         get() = readBool("input_stats", true)
         set(v) = sp.edit().putBoolean("input_stats", v).apply()
+
+    /** 记录学习日志（每次上屏 / 自动收录 / 导入都留一条，可在设置页查看） */
+    var learningLog: Boolean
+        get() = readBool("learning_log", true)
+        set(v) = sp.edit().putBoolean("learning_log", v).apply()
+
+    /** 深色模式用纯黑底（OLED 省电、也更接近系统深色） */
+    var pureBlackDark: Boolean
+        get() = readBool("pure_black_dark", false)
+        set(v) = sp.edit().putBoolean("pure_black_dark", v).apply()
+
+    // ---- 深浅色 ----
+    /**
+     * 当前是否应该用深色界面。
+     *
+     * 只信 `Configuration.UI_MODE_NIGHT_MASK` 是不够的：部分 ROM 在「定时切换 / 自动」
+     * 模式下会把 uiMode 报成 UNDEFINED，输入法窗口又不会随系统主题重建，
+     * 结果就是深色系统里键盘还是浅色。这里再退一步问 [UiModeManager]。
+     */
+    fun isDarkUi(context: Context): Boolean {
+        when (themeMode) {
+            THEME_LIGHT -> return false
+            THEME_DARK -> return true
+            else -> Unit
+        }
+        val cfg = context.resources.configuration
+        return when (cfg.uiMode and Configuration.UI_MODE_NIGHT_MASK) {
+            Configuration.UI_MODE_NIGHT_YES -> true
+            Configuration.UI_MODE_NIGHT_NO -> false
+            else -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val um = runCatching {
+                        context.getSystemService(UiModeManager::class.java)
+                    }.getOrNull()
+                    when (um?.nightMode) {
+                        UiModeManager.MODE_NIGHT_YES -> true
+                        UiModeManager.MODE_NIGHT_NO -> false
+                        else -> false
+                    }
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    // ---- 候选权重（给爱调排序的人） ----
+    /*
+     * 默认值与之前写死在 PredictionEngine 里的常数一致，
+     * 所以不调的时候排序行为完全不变。
+     */
+
+    /** 完整拼音/整词命中额外加的分（默认 26） */
+    var weightExact: Int
+        get() = readInt("w_exact", 26)
+        set(v) = sp.edit().putInt("w_exact", v.coerceIn(0, 60)).apply()
+
+    /** 本机学习词频的权重系数（默认 22，越大越偏向自己常用的词） */
+    var weightUser: Int
+        get() = readInt("w_user", 22)
+        set(v) = sp.edit().putInt("w_user", v.coerceIn(0, 80)).apply()
+
+    /** 词长带来的加成（默认 1.5，越大越偏爱长词） */
+    var weightLength: Int
+        get() = readInt("w_length", 15)
+        set(v) = sp.edit().putInt("w_length", v.coerceIn(0, 50)).apply()
+
+    /** 日常高频词加成（默认 20，0 表示关闭） */
+    var weightDaily: Int
+        get() = readInt("w_daily", 20)
+        set(v) = sp.edit().putInt("w_daily", v.coerceIn(0, 60)).apply()
+
+    /** 简拼候选的加成（默认 6） */
+    var weightInitials: Int
+        get() = readInt("w_initials_bonus", 6)
+        set(v) = sp.edit().putInt("w_initials_bonus", v.coerceIn(0, 30)).apply()
+
+    /** 中英混输时最多内联几个英文词（0 表示不内联） */
+    var mixedEnglishCount: Int
+        get() = readInt("mixed_english_count", 3)
+        set(v) = sp.edit().putInt("mixed_english_count", v.coerceIn(0, 8)).apply()
+
+    /** 一键恢复候选权重默认值 */
+    fun resetCandidateWeights() {
+        sp.edit()
+            .putInt("w_exact", 26)
+            .putInt("w_user", 22)
+            .putInt("w_length", 15)
+            .putInt("w_daily", 20)
+            .putInt("w_initials_bonus", 6)
+            .putInt("mixed_english_count", 3)
+            .apply()
+    }
 
     /** 中英混输：拼音候选里内联英文词，免去切换输入模式 */
     var mixedEnglish: Boolean

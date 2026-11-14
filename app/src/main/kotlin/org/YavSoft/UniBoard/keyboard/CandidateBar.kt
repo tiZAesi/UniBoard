@@ -140,13 +140,24 @@ class CandidateBar @JvmOverloads constructor(
 
     var candidates: List<Candidate> = emptyList()
         set(value) {
+            val textChanged = field.firstOrNull()?.text != value.firstOrNull()?.text
             field = value
             offsetX = 0f
             contentWidthCache = -1f
             pressedCandidate = -1
             pressedTool = -1
             invalidate()
+            // 首候选变了才轻微淡入一下：每个字母都做会显得闪，完全不做到又像「硬跳」
+            if (textChanged && prefs.keyAnimation) {
+                animate().cancel()
+                alpha = 0.72f
+                animate().alpha(1f).setDuration(110)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
+                    .start()
+            }
         }
+
+    private val prefs = Prefs(context)
 
     private val fontResolver by lazy { FontResolver.get(context) }
     private val baseTypeface: Typeface = Typeface.DEFAULT

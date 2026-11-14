@@ -12,6 +12,7 @@
 package org.YavSoft.UniBoard.ime
 
 import android.content.Intent
+import android.content.res.Configuration
 import android.inputmethodservice.InputMethodService
 import android.text.InputType
 import android.view.KeyEvent
@@ -28,6 +29,7 @@ import org.YavSoft.UniBoard.R
 import org.YavSoft.UniBoard.core.InputMode
 import org.YavSoft.UniBoard.unicode.CodeInputEngine
 import org.YavSoft.UniBoard.core.InputStats
+import org.YavSoft.UniBoard.core.LearningLog
 import org.YavSoft.UniBoard.core.KeyboardGroup
 import org.YavSoft.UniBoard.core.KeyboardKind
 import org.YavSoft.UniBoard.core.Prefs
@@ -61,6 +63,7 @@ class UniBoardImeService : InputMethodService(),
     private lateinit var script: org.YavSoft.UniBoard.script.ScriptEngine
     private lateinit var theme: KeyboardTheme
     private lateinit var stats: InputStats
+    private lateinit var log: LearningLog
 
     private var rootView: LinearLayout? = null
     private var columnView: LinearLayout? = null
@@ -153,6 +156,7 @@ class UniBoardImeService : InputMethodService(),
         super.onCreate()
         prefs = Prefs(this)
         stats = InputStats(this)
+        log = LearningLog(this)
         theme = KeyboardThemes.resolve(this, prefs)
         engine = PredictionEngine(this, prefs)
         engine.initializeAsync {
@@ -239,6 +243,27 @@ class UniBoardImeService : InputMethodService(),
     }
 
     /**
+     * 系统配置变化（最主要是深浅色切换）。
+     *
+     * 输入法窗口不会因为系统换主题而重建，配色又是自己画的，所以必须在这里
+     * 主动清缓存、重新解析、重新应用一遍 —— 否则就会出现「系统已经是深色，
+     * 键盘还是浅色」这种一眼就能看出来的错配。
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        KeyboardThemes.invalidate()
+        theme = KeyboardThemes.resolve(this, prefs)
+        applyTheme()
+        unicodePanel?.theme = theme
+        clipboardPanel?.theme = theme
+        emojiPanel?.theme = theme
+        editPanel?.theme = theme
+        keyboardPicker?.theme = theme
+        refreshLayout()
+        updateCandidates()
+    }
+
+    /**
      * 物理键盘（外接蓝牙/USB 键盘）：像桌面输入法一样直接吃按键。
      *
      * 字母、数字、空格走和屏幕键盘同一条路径（拼音/九键/注音/日文都能用），
@@ -313,6 +338,7 @@ class UniBoardImeService : InputMethodService(),
         flushLexicon()
         engine.flush()
         stats.flush()
+        log.flush()
         super.onFinishInput()
     }
 
@@ -732,6 +758,7 @@ class UniBoardImeService : InputMethodService(),
             lex.bump(w)
         } else if (prefs.autoCollectWords) {
             lex.add(org.YavSoft.UniBoard.predict.UserLexicon.Entry(w, "", 120, "auto"))
+            if (prefs.learningLog) log.record(LearningLog.KIND_COLLECT, w, "自动收录")
         } else {
             return
         }
@@ -922,6 +949,7 @@ class UniBoardImeService : InputMethodService(),
         val needSpace = mode == InputMode.LATIN && out.last().isLetterOrDigit()
         composer.commit(if (needSpace) "$out " else out)
         if (prefs.inputStats) stats.recordCommit(out)
+        if (prefs.learningLog) log.record(LearningLog.KIND_COMMIT, out, "直接上屏")
         if (out.isNotBlank()) {
             if (prefs.learningEnabled) engine.noteCommit(out.trim(), lastWord)
             lastWord = out.trim()
@@ -1152,6 +1180,10 @@ class UniBoardImeService : InputMethodService(),
                         applyKeyboardType(type)
                     }
 
+                    override fun onPickScheme(schemeId: Int) {
+                        applyShuangpinScheme(schemeId)
+                    }
+
                     override fun onClose() {
                         hideKeyboardPicker()
                     }
@@ -1168,14 +1200,55 @@ class UniBoardImeService : InputMethodService(),
         } else {
             panel.refresh()
         }
-        panel.visibility = View.VISIBLE
-        panel.bringToFront()
+        revealPanel(panel)
         syncChromeVisibility()
     }
 
     private fun hideKeyboardPicker() {
         keyboardPicker?.visibility = View.GONE
         syncChromeVisibility()
+    }
+
+    /** 面板出现：淡入 + 轻微上移，避免整块硬闪 */
+    private fun revealPanel(panel: View) {
+        panel.animate().cancel()
+        panel.visibility = View.VISIBLE
+        panel.bringToFront()
+        if (prefs.keyAnimation) {
+            panel.alpha = 0f
+            panel.translationY = dpInt(16f).toFloat()
+            panel.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(180)
+                .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
+                .start()
+        } else {
+            panel.alpha = 1f
+            panel.translationY = 0f
+        }
+    }
+
+    /** 面板收起：立刻隐藏，同时把动画状态复位，下次打开不会带着旧位移 */
+    private fun hidePanel(panel: View?) {
+        panel?.animate()?.cancel()
+        panel?.visibility = View.GONE
+        panel?.alpha = 1f
+        panel?.translationY = 0f
+    }
+
+    /**
+     * 切换双拼方案。
+     *
+     * 既然用户是「长按双拼 → 选方案」，顺手把键盘切到双拼才符合预期：
+     * 否则选完方案键盘没变，还得再点一次双拼那一行。
+     */
+    private fun applyShuangpinScheme(schemeId: Int) {
+        prefs.shuangpinScheme = schemeId
+        val scheme = org.YavSoft.UniBoard.predict.ShuangpinScheme.of(schemeId)
+        // applyKeyboardType 内部会清组合串、收起面板、重排键盘
+        applyKeyboardType(KeyboardKind.SHUANGPIN.id)
+        toast("双拼方案：${scheme.label}")
     }
 
     /**
@@ -1271,6 +1344,7 @@ class UniBoardImeService : InputMethodService(),
         val committed = if (mode == InputMode.LATIN || c.english) "$word " else word
         composer.commit(committed)
         if (prefs.inputStats) stats.recordCommit(committed)
+        if (prefs.learningLog) log.record(LearningLog.KIND_COMMIT, word, if (c.english) "英文" else "")
         lastWord = word
         correctedHint = null
         if (nineActive) {
@@ -1309,6 +1383,7 @@ class UniBoardImeService : InputMethodService(),
             learnWord(word)
         }
         composer.commit(if (mode == InputMode.LATIN) "$word " else word)
+        if (prefs.learningLog) log.record(LearningLog.KIND_COMMIT, word, "滑行")
         lastWord = word
         correctedHint = null
         currentCandidates = words.drop(1)
@@ -1735,6 +1810,7 @@ class UniBoardImeService : InputMethodService(),
 
     override fun onDestroy() {
         runCatching { stats.flush() }
+        runCatching { log.flush() }
         engine.flush()
         super.onDestroy()
     }

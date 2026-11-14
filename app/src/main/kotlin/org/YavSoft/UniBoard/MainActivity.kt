@@ -70,13 +70,13 @@ class MainActivity : SettingsBase() {
             setPadding(dpInt(12f), dpInt(6f), dpInt(8f), dpInt(6f))
             background = android.graphics.drawable.GradientDrawable().apply {
                 cornerRadius = dpInt(20f).toFloat()
-                setColor(0xFFF2F2F2.toInt())
-                setStroke(dpInt(1f), 0xFFE0E0E0.toInt())
+                setColor(colorSurfaceCard())
+                setStroke(dpInt(1f), colorDividerLine())
             }
         }
         searchRow.addView(android.widget.ImageView(this).apply {
             setImageResource(org.YavSoft.UniBoard.R.drawable.ic_search)
-            imageTintList = android.content.res.ColorStateList.valueOf(0xFF9E9E9E.toInt())
+            imageTintList = android.content.res.ColorStateList.valueOf(colorHint())
             setPadding(dpInt(8f), dpInt(8f), dpInt(8f), dpInt(8f))
             layoutParams = LinearLayout.LayoutParams(dpInt(34f), dpInt(34f))
         })
@@ -84,8 +84,8 @@ class MainActivity : SettingsBase() {
             hint = "搜索设置项，例如字体、透明度、隐私、候选"
             textSize = 15f
             setSingleLine(true)
-            setTextColor(0xFF212121.toInt())
-            setHintTextColor(0xFF9E9E9E.toInt())
+            setTextColor(colorTextPrimary())
+            setHintTextColor(colorHint())
             setBackgroundColor(0x00000000)
             setPadding(0, dpInt(10f), 0, dpInt(10f))
         }
@@ -94,7 +94,7 @@ class MainActivity : SettingsBase() {
             text = "×"
             textSize = 18f
             gravity = android.view.Gravity.CENTER
-            setTextColor(0xFF9E9E9E.toInt())
+            setTextColor(colorHint())
             setPadding(dpInt(10f), dpInt(4f), dpInt(10f), dpInt(4f))
             visibility = android.view.View.GONE
             setOnClickListener { input.setText("") }
@@ -127,7 +127,7 @@ class MainActivity : SettingsBase() {
             searchResults.addView(TextView(this).apply {
                 text = "未找到匹配的设置项"
                 textSize = 13f
-                setTextColor(0xFF9E9E9E.toInt())
+                setTextColor(colorHint())
                 setPadding(dpInt(16f), dpInt(6f), dpInt(16f), dpInt(14f))
             })
             return
@@ -145,16 +145,16 @@ class MainActivity : SettingsBase() {
             row.addView(TextView(this).apply {
                 text = item.label
                 textSize = 15f
-                setTextColor(0xFF212121.toInt())
+                setTextColor(colorTextPrimary())
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             row.addView(TextView(this).apply {
                 text = "›"
                 textSize = 18f
-                setTextColor(0xFF9E9E9E.toInt())
+                setTextColor(colorHint())
             })
             searchResults.addView(row)
             searchResults.addView(android.view.View(this).apply {
-                setBackgroundColor(0xFFEEEEEE.toInt())
+                setBackgroundColor(colorRowPressed())
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
             })
         }
@@ -173,13 +173,13 @@ class MainActivity : SettingsBase() {
         box.addView(TextView(this).apply {
             text = state
             textSize = 16f
-            setTextColor(0xFF212121.toInt())
+            setTextColor(colorTextPrimary())
             setPadding(dpInt(16f), dpInt(16f), dpInt(16f), dpInt(4f))
         })
         box.addView(TextView(this).apply {
             text = "请先在系统设置中启用本输入法，再将其设为当前输入法。"
             textSize = 12.5f
-            setTextColor(0xFF757575.toInt())
+            setTextColor(colorHint())
             setPadding(dpInt(16f), 0, dpInt(16f), dpInt(8f))
         })
         when {
@@ -249,12 +249,12 @@ class MainActivity : SettingsBase() {
         row.addView(TextView(this).apply {
             text = name
             textSize = 16f
-            setTextColor(0xFF212121.toInt())
+            setTextColor(colorTextPrimary())
         })
         row.addView(TextView(this).apply {
             text = desc
             textSize = 12.5f
-            setTextColor(0xFF757575.toInt())
+            setTextColor(colorHint())
             setPadding(0, dpInt(3f), 0, 0)
         })
         box.addView(row)
